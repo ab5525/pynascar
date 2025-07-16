@@ -7,7 +7,7 @@ import requests
 # endpoint for race list
 #https://cf.nascar.com/cacher/2023/race_list_basic.json
 
-class Races:
+class Schedule:
     '''
     
     Class to handle fetching and storing race data for a specific year and series ID.
@@ -39,7 +39,11 @@ class Races:
     
     def get_completed_races(self):
         """Return a list of completed races."""
-        return self.data[self.data['total_race_time'].isna()]['race_name'].tolist()
+        return self.data[self.data['winner_driver_id'].notna()]['race_name'].tolist()
+    
+    def get_remaining_races(self):
+        """Return a list of remaining races."""
+        return self.data[self.data['winner_driver_id'].isna()]['race_name'].tolist()
             
 
     
