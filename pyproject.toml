@@ -9,7 +9,7 @@ description = "Unofficial tools for NASCAR data"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
-authors = [{ name = "Your Name", email = "you@example.com" }]
+authors = [{ name = "ab5525", email = "admin@jakbytes.com" }]
 keywords = ["nascar", "motorsport", "data", "api"]
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -30,6 +30,7 @@ Issues = "https://github.com/ab5525/pynascar/issues"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
