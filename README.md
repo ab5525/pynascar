@@ -70,7 +70,7 @@ Race Laps:
 race_data.laps
 ```
 
-| 54   | Driver          | Car | Manufacturer | lap | time                      | speed   | Pos |
+| Index   | Driver          | Car | Manufacturer | lap | time                      | speed   | Pos |
 | ---- | --------------- | --- | ------------ | --- | ------------------------- | ------- | --- |
 | 2527 | Daniel Suarez   | 99  | Chv          | 100 | 0 days 00:00:00.000000047 | 189.861 | 13  |
 | 1586 | Austin Cindric  | 2   | Frd          | 171 | 0 days 00:00:00.000000046 | 193.861 | 1   |
@@ -93,9 +93,6 @@ race_data.pit_stops
 | Chase Briscoe  | 10  | Tyt          | 2                  | 2                   | 670.433          | 889.714           | 11618.198      | 703.315            | 12283.555           | ... | OTHER                  | False                   | False                  | False                    | False                   | 0                 | 0             | 4           | 4            | 0                     |
 | Joey Logano    | 10  | Frd          | 2                  | 2                   | 672.424          | 903.406           | 11629.899      | 700.895            | 12294.975           | ... | FOUR_WHEEL_CHANGE      | True                    | True                   | True                     | True                    | 0                 | 0             | 6           | 5            | 1                     |
 
-📋 Copy
-Clear
-Buy Me a Coffee at ko-fi.com
 
 Race Events:
 
