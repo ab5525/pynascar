@@ -27,8 +27,10 @@ from pynascar import Schedule, Race
 schedule = Schedule(year= 2025, series_id = 1)
 
 # This function isnt currently added. Will be in v 0.1.1
-race_info = schedule.get_most_recent_race()
-race_data = Race(year = 2025, series_id = 2, race_id = 5546)
+race_info = schedule.next_race()
+race_year = race_info['race_year']
+next_race_id = race_info['race_id']
+race_data = Race(year = 2025, series_id = 2, race_id = next_race_id)
 
 
 ```
