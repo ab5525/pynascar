@@ -6,7 +6,6 @@ import warnings
 from .codes import FLAG_CODE
 
 #https://cf.nascar.com/cacher/2023/2/5314/lap-times.json
-#
 
 class Race:
     def __init__(self, year, series_id,race_id=None,live=False):
@@ -39,6 +38,7 @@ class Race:
         self.end_time = None
         self.distance = None
         self.lap_count = None
+        self.drivers = pd.DataFrame()
 
         # Stage Results. Currently shows only the top 10
         self.stage_1_results = None
@@ -53,6 +53,7 @@ class Race:
         self.get_pit_stops()
         self.fetch_events()
         self.get_race_data()
+        self.get_driver_stats()
 
     def get_race_data(self):
         """
@@ -369,3 +370,39 @@ class Race:
         """Return qualifying data for a specific round."""
         data = self.qualifying_data[self.qualifying_data['qualifying_round'] == round] if not self.qualifying_data.empty else pd.DataFrame()
         return data
+    
+    def get_driver_stats(self):
+        #https://cf.nascar.com/loopstats/prod/2023/2/5314.json
+        url = f"https://cf.nascar.com/loopstats/prod/{self.year}/{self.series_id}/{self.race_id}.json"
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+
+            # Data comes in array
+            drivers = data[0].get('drivers', [])
+            driver_list = []
+            for i in drivers:
+                driver_list.append({
+                    'driver_id': i.get('driver_id'),
+                    'driver_name': None,
+                    'start_position': i.get('start_ps'),
+                    'mid_position': i.get('mid_ps'),
+                    'position': i.get('ps'),
+                    'closing_position': i.get('closing_ps'),
+                    'closing_laps_diff': i.get('closing_laps_diff'),
+                    'best_position': i.get('best_ps'),
+                    'worst_position': i.get('worst_ps'),
+                    'avg_position': i.get('avg_ps'),
+                    'passes_green_flag': i.get('passes_gf'),
+                    'passing_diff': i.get('passing_diff'),
+                    'passed_green_flag': i.get('passed_gf'),
+                    'quality_passes': i.get('quality_passes'),
+                    'fast_laps': i.get('fast_laps'),
+                    'top15_laps': i.get('top15_laps'),
+                    'lead_laps': i.get('lead_laps'),
+                    'laps': i.get('laps'),
+                    'rating': i.get('rating'),
+                })
+            
+            self.drivers = pd.DataFrame(driver_list) if driver_list else pd.DataFrame()
+            self.drivers['driver_name'] = self.drivers['driver_id'].map(self.results.set_index('driver_id')['driver']) if not self.drivers.empty else None
