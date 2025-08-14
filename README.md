@@ -109,3 +109,9 @@ race_data.events
 | 1   | 1   | 1          | Green   | #19 leads the field to the green on the inside... | [4228, 4180, 4228]                                |
 | 2   | 3   | 1          | Green   | #19, #23 and #2 get single file in front of th... | [4228, 4025, 4180]                                |
 | 3   | 5   | 1          | Green   | #77 reports fuel pressure issues and loses the... | [4326]                                            |
+
+
+## TODO
+1: Add Caching
+2: Add Driver Stats 
+3: Add tests
