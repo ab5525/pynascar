@@ -4,6 +4,8 @@ import pandas as pd
 import requests
 import warnings
 from .codes import FLAG_CODE
+from .caching import load_df, save_df
+
 
 #https://cf.nascar.com/cacher/2023/2/5314/lap-times.json
 
@@ -215,6 +217,11 @@ class Race:
 
     def fetch_laps(self):
         """Fetch lap times for the specified race ID."""
+        cached = load_df("laps", year=self.year, series_id=self.series_id, race_id=self.race_id, live=self.live)
+        if cached is not None:
+            self.laps = cached
+            return
+        
         if self.live:
             url = f"https://cf.nascar.com/cacher/live/series_{self.series_id}/{self.race_id}/lap-times.json"
         else:
@@ -244,6 +251,9 @@ class Race:
             self.laps['Lap'] = self.laps['Lap'].astype(int)
             self.laps['lap_time'] = pd.to_timedelta(self.laps['lap_time'])
             self.laps['lap_speed'] = self.laps['lap_speed'].astype(float)
+
+            # Save the DataFrame to cache
+            save_df("laps", self.laps, year=self.year, series_id=self.series_id, race_id=self.race_id, live=self.live)
         else:
             print(f"Failed to retrieve lap data: {response.status_code}")
             print(f"url: {url}")

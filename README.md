@@ -21,7 +21,10 @@ updates will be made regularly until all public API endpoints are hit
 You can use this package to obtain data from any existing or live race including lap times, pit stop laps and times, all in race flags and all race control messages. The full schedule as well.
 
 ```python
-from pynascar import Schedule, Race
+from pynascar import Schedule, Race, set_options
+
+# Create a local cache that saves the data. This is optional but we do not want to download data from NASCAR over and over
+set_options(cache_enabled=True, cache_dir=".cache/pynascar", df_format="parquet")
 
 # Get the schedule for the current year
 schedule = Schedule(year= 2025, series_id = 1)
