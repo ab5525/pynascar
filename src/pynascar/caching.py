@@ -8,110 +8,109 @@ import re
 import pandas as pd
 from .config import get_settings
 
-# Ensures that any string does not contain characters that are not allowed in file names
-def _sanitize_key(key: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", key).strip("_")
+# Sanitize path segments and filenames
+def _sanitize(s: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", s).strip("_")
 
-def _compose_key(base: str, parts: dict | None = None) -> str:
-    """
-    Compose a stable cache key from a base name and optional parameters.
-    Example: base='lap_times', parts={'year': 2024, 'series': 'cup'}
-             -> 'lap_times__series-cup__year-2024' (sorted by key)
-    Hyphens and underscores are preserved by _sanitize_key.
-    """
-    if not parts:
-        return base
-    # Normalize values to short strings
-    normalized = {}
-    for k, v in parts.items():
-        if isinstance(v, (list, tuple, set)):
-            v = ",".join(map(str, v))
-        elif isinstance(v, dict):
-            v = ",".join(f"{kk}:{vv}" for kk, vv in sorted(v.items()))
-        else:
-            v = str(v)
-        normalized[str(k)] = v
-    tokens = [f"{k}-{normalized[k]}" for k in sorted(normalized.keys())]
-    return f"{base}__{'__'.join(tokens)}"
+def _seg(v) -> str:
+    if v is None:
+        raise ValueError("year, series_id, and race_id must be provided")
+    return _sanitize(str(v))
 
-def _cache_path(key: str, fmt: str | None = None) -> Path:
+def race_cache_dir(year, series_id, race_id) -> Path:
+    """
+    <cache_dir>/<year>/<series_id>/<race_id>
+    """
     s = get_settings()
-    # Even if disabled, return the would-be path for callers that want to know it.
+    d = Path(s.cache_dir) / _seg(year) / _seg(series_id) / _seg(race_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+def _cache_path(key: str, year, series_id, race_id, fmt: str | None = None) -> Path:
+    s = get_settings()
     fmt = (fmt or s.df_format).lower()
     ext = ".parquet" if fmt == "parquet" else ".csv"
-    cache_dir = s.cache_dir
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir / f"{_sanitize_key(key)}{ext}"
+    return race_cache_dir(year, series_id, race_id) / f"{_sanitize(key)}{ext}"
 
-def save_df(key: str, df: pd.DataFrame, fmt: str | None = None, **key_parts) -> Path:
+def save_df(key: str, df: pd.DataFrame, *, year, series_id, race_id, fmt: str | None = None) -> Path:
     """
-    Save a DataFrame to cache. Extra keyword args are folded into the key.
-    Example: save_df("lap_times", df, year=2024, series="cup")
+    Save: <cache_dir>/<year>/<series_id>/<race_id>/<key>.(csv|parquet)
     """
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError(f"save_df expects a pandas DataFrame; got {type(df).__name__}")
     s = get_settings()
-    full_key = _compose_key(key, key_parts)
+    path = _cache_path(key, year, series_id, race_id, fmt)
     if not (s.cache_enabled and s.df_cache_enabled):
-        return _cache_path(full_key, fmt)  # no-op but return target path
+        return path  # no-op but return target path
 
     fmt = (fmt or s.df_format).lower()
-    path = _cache_path(full_key, fmt)
-
     if fmt == "parquet":
         try:
             df.to_parquet(path, index=False)
-            print(f'Saved to local Cache: {path}')
         except Exception as e:
             raise RuntimeError(
-                "Failed to write parquet. Install the optional dependency 'pyarrow' "
-                "or set df_format='csv' via set_options()."
+                "Failed to write parquet. Install 'pyarrow' or set df_format='csv' via set_options()."
             ) from e
     elif fmt == "csv":
         df.to_csv(path, index=False)
-        print(f'Saved to local Cache: {path}')
     else:
         raise ValueError("Unsupported format. Use 'csv' or 'parquet'.")
-
     return path
 
-def load_df(key: str, fmt: str | None = None, **key_parts) -> pd.DataFrame | None:
+def load_df(key: str, *, year, series_id, race_id, fmt: str | None = None) -> pd.DataFrame | None:
     """
-    Load a DataFrame from cache. Extra keyword args are folded into the key.
-    Example: load_df("lap_times", year=2024, series="cup")
+    Load: <cache_dir>/<year>/<series_id>/<race_id>/<key>.(csv|parquet)
     """
     s = get_settings()
     if not (s.cache_enabled and s.df_cache_enabled):
         return None
 
-    fmt = (fmt or s.df_format).lower()
-    full_key = _compose_key(key, key_parts)
-    path = _cache_path(full_key, fmt)
+    path = _cache_path(key, year, series_id, race_id, fmt)
     if not path.exists():
         return None
 
+    fmt = (fmt or s.df_format).lower()
     if fmt == "parquet":
         try:
-            loaded_df = pd.read_parquet(path)
-            print(f'Loaded from local Cache: {path}')
-            return loaded_df
+            return pd.read_parquet(path)
         except Exception as e:
-            raise RuntimeError(
-                "Failed to read parquet. Install 'pyarrow' or use 'csv' format."
-            ) from e
+            raise RuntimeError("Failed to read parquet. Install 'pyarrow' or use 'csv'.") from e
     elif fmt == "csv":
-        loaded_df = pd.read_csv(path)
-        print(f'Loaded from local Cache: {path}')
-        return loaded_df
+        return pd.read_csv(path)
     else:
         raise ValueError("Unsupported format. Use 'csv' or 'parquet'.")
 
-def has_df(key: str, fmt: str | None = None, **key_parts) -> bool:
-    full_key = _compose_key(key, key_parts)
-    return _cache_path(full_key, fmt).exists()
+def has_df(key: str, *, year, series_id, race_id, fmt: str | None = None) -> bool:
+    return _cache_path(key, year, series_id, race_id, fmt).exists()
 
-def clear_df(key: str, fmt: str | None = None, **key_parts) -> bool:
-    full_key = _compose_key(key, key_parts)
-    p = _cache_path(full_key, fmt)
+def clear_df(key: str, *, year, series_id, race_id, fmt: str | None = None) -> bool:
+    p = _cache_path(key, year, series_id, race_id, fmt)
     if p.exists():
         p.unlink(missing_ok=True)
         return True
     return False
+
+def clear_race(year, series_id, race_id) -> bool:
+    """
+    Delete <cache_dir>/<year>/<series_id>/<race_id> and prune empty parents.
+    """
+    d = race_cache_dir(year, series_id, race_id)
+    removed = False
+    if d.exists():
+        for p in d.glob("*"):
+            if p.is_file():
+                p.unlink(missing_ok=True)
+                removed = True
+        try:
+            d.rmdir()
+        except OSError:
+            pass
+        # prune series and year if empty
+        parent = d.parent
+        for _ in range(2):
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+            parent = parent.parent
+    return removed

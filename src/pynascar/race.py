@@ -57,14 +57,50 @@ class Race:
         self.get_race_data()
         self.get_driver_stats()
 
+
     def get_race_data(self):
         """
         Fetch data for the race
-        """   
-        if self.live:
-            url = f"https://cf.nascar.com/cacher/live/series_{self.series_id}/{self.race_id}/weekend-feed.json"
-        else:
+        """
+        if not self.live:
+            cached_results = load_df("results", year=self.year, series_id=self.series_id, race_id=self.race_id)
+            cached_cautions = load_df("cautions", year=self.year, series_id=self.series_id, race_id=self.race_id)
+            cached_lead_changes = load_df("lead_changes", year=self.year, series_id=self.series_id, race_id=self.race_id)
+            cached_stage1 = load_df("stage_1_results", year=self.year, series_id=self.series_id, race_id=self.race_id)
+            cached_stage2 = load_df("stage_2_results", year=self.year, series_id=self.series_id, race_id=self.race_id)
+            cached_stage3 = load_df("stage_3_results", year=self.year, series_id=self.series_id, race_id=self.race_id)
+
+            if cached_results is not None:
+                self.results = cached_results
+            if cached_cautions is not None:
+                self.cautions = cached_cautions
+            if cached_lead_changes is not None:
+                self.lead_changes = len(cached_lead_changes) - 1 if not cached_lead_changes.empty else 0
+                self.lead_change_data = cached_lead_changes
+
+            if cached_stage1 is not None:
+                self.stage_1_results = cached_stage1
+            if cached_stage2 is not None:
+                self.stage_2_results = cached_stage2
+            if cached_stage3 is not None:
+                self.stage_3_results = cached_stage3
+
+            if (
+                cached_results is not None
+                and cached_cautions is not None
+                and cached_lead_changes is not None
+                and cached_stage1 is not None
+                and cached_stage2 is not None
+                and cached_stage3 is not None
+            ):
+                 print(f'Loading data from Cache for: {self.year}-{self.series_id}-{self.race_id}')
+                 return
+            
             url = f"https://cf.nascar.com/cacher/{self.year}/{self.series_id}/{self.race_id}/weekend-feed.json"
+            print(f'Fetching data for {self.year}-{self.series_id}-{self.race_id}')
+        else:
+            url = f"https://cf.nascar.com/cacher/live/series_{self.series_id}/{self.race_id}/weekend-feed.json"
+            print(f'Loading live data for: {self.year}-{self.series_id}-{self.race_id}')
 
         response = requests.get(url)
         if response.status_code == 200:
@@ -83,12 +119,12 @@ class Race:
 
             
             results = weekend.get('results', [])
-            cautions = weekend.get('caution_segments', [])
+            caution_segments = weekend.get('caution_segments', [])
             leaders = weekend.get('race_leaders', [])
             stages = weekend.get('stage_results', [])
 
             driver_res = []
-            cautions = []
+            caution_rows = []
             leader_list = []
             stage_1 = []
             stage_2 = []
@@ -113,9 +149,11 @@ class Race:
                     'playoff_points': i.get('playoff_points_earned'),
                 })
             self.results = pd.DataFrame(driver_res)
+            if not self.live:
+                save_df("results", self.results, year=self.year, series_id=self.series_id, race_id=self.race_id)
 
-            for i in cautions:
-                cautions.append({
+            for i in caution_segments:
+                caution_rows.append({
                     'start_lap': i.get('start_lap'),
                     'end_lap': i.get('end_lap'),
                     'caution_type': i.get('reason'),
@@ -123,10 +161,12 @@ class Race:
                     'flag_state': i.get('flag_state'),
                 })
 
-            self.cautions = pd.DataFrame(cautions) if cautions else pd.DataFrame()
+            self.cautions = pd.DataFrame(caution_rows) if caution_rows else pd.DataFrame()
             self.cautions['Flag'] = self.cautions['flag_state'].map(FLAG_CODE) if not self.cautions.empty else None
             self.cautions['duration'] = self.cautions['end_lap'] - self.cautions['start_lap'] if not self.cautions.empty else None
-
+            
+            if not self.live:
+                save_df("cautions", self.cautions, year=self.year, series_id=self.series_id, race_id=self.race_id)
             for i in leaders:
                 leader_list.append({
                     'start_lap': i.get('start_lap'),
@@ -139,6 +179,8 @@ class Race:
                 self.lead_changes = len(leader_list) - 1 if leader_list else 0
                 self.lead_change_data = pd.DataFrame(leader_list) if leader_list else pd.DataFrame()
                 self.lead_change_data['driver_name'] = self.lead_change_data['car_number'].map(self.results.set_index('driver_number')['driver']) if not self.lead_change_data.empty else None
+                if not self.live:
+                    save_df("lead_changes", self.lead_change_data, year=self.year, series_id=self.series_id, race_id=self.race_id)
             except Exception as e:
                 print(f"Error processing lead changes: {e}")
             
@@ -175,52 +217,50 @@ class Race:
             self.stage_2_results = pd.DataFrame(stage_2) if stage_2 else pd.DataFrame()
             self.stage_3_results = pd.DataFrame(stage_3) if stage_3 else pd.DataFrame()
 
-            for i in weekend_runs:
-                if 'practice' in i.get('run_name').lower():
-                    if 'practice 1' in i.get('run_name').lower():
-                        p1 = self.get_practice_results(i)
-                        p1['practice_number'] = 1
-                        self.practice_data = p1
-                    if 'practice 2' in i.get('run_name').lower():
-                        p2 = self.get_practice_results(i)
-                        p2['practice_number'] = 2
-                        self.practice_data = pd.concat([self.practice_data, p2], ignore_index=True)
-                    if 'practice 3' in i.get('run_name').lower():
-                        p3 = self.get_practice_results(i)
-                        p3['practice_number'] = 3
-                        self.practice_data = pd.concat([self.practice_data, p3], ignore_index=True)
-                    if 'final practice' in i.get('run_name').lower():
-                        final_practice = self.get_practice_results(i)
-                        # Any final will be 4
-                        final_practice['practice_number'] = 4
-                        self.practice_data = pd.concat([self.practice_data, final_practice], ignore_index=True)
-                    else:
-                        self.practice_data = pd.concat([self.practice_data, self.get_practice_results(i)], ignore_index=True)
+            if not self.live:
+                save_df('stage_1_results', self.stage_1_results, year=self.year, series_id=self.series_id, race_id=self.race_id)
+                save_df('stage_2_results', self.stage_2_results, year=self.year, series_id=self.series_id, race_id=self.race_id)
+                save_df('stage_3_results', self.stage_3_results, year=self.year, series_id=self.series_id, race_id=self.race_id)
 
-                elif 'pole qualifying' in i.get('run_name').lower():
-                    # print(f"Qualifying run found: {i.get('run_name')}")
-                    if 'round 1' in i.get('run_name').lower():
-                        run1 = self.get_qualifying_results(i)
-                        run1['qualifying_round'] = 1
-                        self.qualifying_data = pd.concat([self.qualifying_data, run1], ignore_index=True) if not self.qualifying_data.empty else run1
-                    if 'final round' in i.get('run_name').lower():
-                        final_round = self.get_qualifying_results(i)
-                        final_round['qualifying_round'] = 2
-                        self.qualifying_data = pd.concat([self.qualifying_data, final_round], ignore_index=True) if not self.qualifying_data.empty else final_round
-                    else: 
-                        ukr = self.get_qualifying_results(i)
-                        ukr['qualifying_round'] = None
-                        self.qualifying_data = pd.concat([self.qualifying_data, ukr], ignore_index=True) if not self.qualifying_data.empty else ukr
+            # Process weekend runs (practice and qualifying)
+            for run in weekend_runs:
+                name = (run.get('run_name') or '').lower()
+                if 'practice' in name:
+                    df = self.get_practice_results(run)
+                    if 'practice 1' in name:
+                        df['practice_number'] = 1
+                    elif 'practice 2' in name:
+                        df['practice_number'] = 2
+                    elif 'practice 3' in name:
+                        df['practice_number'] = 3
+                    elif 'final practice' in name:
+                        df['practice_number'] = 4
+                    self.practice_data = pd.concat([self.practice_data, df], ignore_index=True) if not self.practice_data.empty else df
+                elif 'pole qualifying' in name:
+                    df = self.get_qualifying_results(run)
+                    if 'round 1' in name:
+                        df['qualifying_round'] = 1
+                    elif 'final round' in name:
+                        df['qualifying_round'] = 2
+                    else:
+                        df['qualifying_round'] = None
+                    self.qualifying_data = pd.concat([self.qualifying_data, df], ignore_index=True) if not self.qualifying_data.empty else df
+            if not self.live:
+                if not self.practice_data.empty:
+                    save_df("practice", self.practice_data, year=self.year, series_id=self.series_id, race_id=self.race_id)
+                if not self.qualifying_data.empty:
+                    save_df("qualifying", self.qualifying_data, year=self.year, series_id=self.series_id, race_id=self.race_id)
 
         else:
             print(f"Failed to retrieve race data: {response.status_code}")
 
     def fetch_laps(self):
         """Fetch lap times for the specified race ID."""
-        cached = load_df("laps", year=self.year, series_id=self.series_id, race_id=self.race_id, live=self.live)
-        if cached is not None:
-            self.laps = cached
-            return
+        if not self.live:
+            cached = load_df("laps", year=self.year, series_id=self.series_id, race_id=self.race_id)
+            if cached is not None:
+                self.laps = cached
+                return
         
         if self.live:
             url = f"https://cf.nascar.com/cacher/live/series_{self.series_id}/{self.race_id}/lap-times.json"
@@ -248,23 +288,28 @@ class Race:
                         'position': j.get('RunningPos'),
                     })
             self.laps = pd.DataFrame(lap_times)
-            self.laps['Lap'] = self.laps['Lap'].astype(int)
-            self.laps['lap_time'] = pd.to_timedelta(self.laps['lap_time'])
-            self.laps['lap_speed'] = self.laps['lap_speed'].astype(float)
+            self.laps['Lap'] = pd.to_numeric(self.laps['Lap'], errors='coerce').astype('Int64')
+            self.laps['lap_time'] = pd.to_timedelta(self.laps['lap_time'], errors='coerce')
+            self.laps['lap_speed'] = pd.to_numeric(self.laps['lap_speed'], errors='coerce')
 
             # Save the DataFrame to cache
-            save_df("laps", self.laps, year=self.year, series_id=self.series_id, race_id=self.race_id, live=self.live)
+            if not self.live:
+                save_df("laps", self.laps, year=self.year, series_id=self.series_id, race_id=self.race_id)
         else:
             print(f"Failed to retrieve lap data: {response.status_code}")
             print(f"url: {url}")
 
     def get_pit_stops(self):
         """Get pit stop information for the race."""
+        if not self.live:
+            cached_pit_stops = load_df("pit_stops", year=self.year, series_id=self.series_id, race_id=self.race_id)
+            if cached_pit_stops is not None:
+                self.pit_stops = cached_pit_stops
+                return
+            url = f"https://cf.nascar.com/cacher/{self.year}/{self.series_id}/{self.race_id}/live-pit-data.json"
         if self.live:
             url = f"https://cf.nascar.com/cacher/live/series_{self.series_id}/{self.race_id}/live-pit-data.json"
-        else:
-            url = f"https://cf.nascar.com/cacher/{self.year}/{self.series_id}/{self.race_id}/live-pit-data.json"
-
+            
         response = requests.get(url)
         if response.status_code == 200:
             data = response.json()
@@ -297,17 +342,23 @@ class Race:
                 })
             # store both list and a DataFrame for convenience
             self.pit_stops = pd.DataFrame(stops) if stops else pd.DataFrame()
+            if not self.live:
+                save_df("pit_stops", self.pit_stops, year=self.year, series_id=self.series_id, race_id=self.race_id)
         else:
             print(f"Failed to retrieve pit stop data: {response.status_code}")
             print(f"url: {url}")
 
     def fetch_events(self):
         """ Fetch lap events and flags"""
+        if not self.live:
+            cached_events = load_df("events", year=self.year, series_id=self.series_id, race_id=self.race_id)
+            if cached_events is not None:
+                self.events = cached_events
+                return
+            url = f"https://cf.nascar.com/cacher/{self.year}/{self.series_id}/{self.race_id}/lap-notes.json"
         if self.live:
             url = f"https://cf.nascar.com/cacher/live/series_{self.series_id}/{self.race_id}/lap-notes.json"
-        else:
-            url = f"https://cf.nascar.com/cacher/{self.year}/{self.series_id}/{self.race_id}/lap-notes.json"
-
+            
         response = requests.get(url)
         if response.status_code == 200:
             data = response.json()
@@ -327,6 +378,8 @@ class Race:
             self.events = pd.DataFrame(events) if events else pd.DataFrame()
             if not self.events.empty:
                 self.events['Flag'] = self.events['Flag_State'].map(FLAG_CODE)
+            if not self.live:
+                save_df("events", self.events, year=self.year, series_id=self.series_id, race_id=self.race_id)
 
         else:
             print(f"Failed to retrieve lap events: {response.status_code}")
@@ -383,6 +436,12 @@ class Race:
     
     def get_driver_stats(self):
         #https://cf.nascar.com/loopstats/prod/2023/2/5314.json
+        if not self.live:
+            cached_driver_stats = load_df("driver_stats", year=self.year, series_id=self.series_id, race_id=self.race_id)
+            if cached_driver_stats is not None:
+                self.driver_stats = cached_driver_stats
+                return
+            
         url = f"https://cf.nascar.com/loopstats/prod/{self.year}/{self.series_id}/{self.race_id}.json"
         response = requests.get(url)
         if response.status_code == 200:
@@ -416,3 +475,5 @@ class Race:
             
             self.drivers = pd.DataFrame(driver_list) if driver_list else pd.DataFrame()
             self.drivers['driver_name'] = self.drivers['driver_id'].map(self.results.set_index('driver_id')['driver']) if not self.drivers.empty else None
+            if not self.live:
+                save_df("driver_stats", self.drivers, year=self.year, series_id=self.series_id, race_id=self.race_id)
