@@ -114,3 +114,142 @@ def clear_race(year, series_id, race_id) -> bool:
                 break
             parent = parent.parent
     return removed
+
+def schedule_cache_dir(year) -> Path:
+    """
+    <cache_dir>/schedule/<year>
+    """
+    s = get_settings()
+    d = Path(s.cache_dir) / "schedule" / _seg(year)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+def _schedule_cache_path(year, series_id, fmt: str | None = None) -> Path:
+    s = get_settings()
+    fmt = (fmt or s.df_format).lower()
+    ext = ".parquet" if fmt == "parquet" else ".csv"
+    return schedule_cache_dir(year) / f"{_sanitize(str(series_id))}{ext}"
+
+def save_schedule(df: pd.DataFrame, *, year, series_id, fmt: str | None = None) -> Path:
+    """
+    Save: <cache_dir>/schedule/<year>/<series_id>.(csv|parquet)
+    """
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError(f"save_schedule expects a pandas DataFrame; got {type(df).__name__}")
+    s = get_settings()
+    path = _schedule_cache_path(year, series_id, fmt)
+    if not (s.cache_enabled and s.df_cache_enabled):
+        return path  # no-op
+
+    fmt = (fmt or s.df_format).lower()
+    if fmt == "parquet":
+        try:
+            df.to_parquet(path, index=False)
+        except Exception as e:
+            raise RuntimeError("Failed to write parquet. Install 'pyarrow' or set df_format='csv'.") from e
+    elif fmt == "csv":
+        df.to_csv(path, index=False)
+    else:
+        raise ValueError("Unsupported format. Use 'csv' or 'parquet'.")
+    return path
+
+def load_schedule(*, year, series_id, fmt: str | None = None) -> pd.DataFrame | None:
+    """
+    Load: <cache_dir>/schedule/<year>/<series_id>.(csv|parquet)
+    """
+    s = get_settings()
+    if not (s.cache_enabled and s.df_cache_enabled):
+        return None
+
+    path = _schedule_cache_path(year, series_id, fmt)
+    if not path.exists():
+        return None
+
+    fmt = (fmt or s.df_format).lower()
+    if fmt == "parquet":
+        try:
+            return pd.read_parquet(path)
+        except Exception as e:
+            raise RuntimeError("Failed to read parquet. Install 'pyarrow' or use 'csv'.") from e
+    elif fmt == "csv":
+        return pd.read_csv(path)
+    else:
+        raise ValueError("Unsupported format. Use 'csv' or 'parquet'.")
+
+def has_schedule(*, year, series_id, fmt: str | None = None) -> bool:
+    return _schedule_cache_path(year, series_id, fmt).exists()
+
+def clear_schedule(*, year, series_id, fmt: str | None = None) -> bool:
+    p = _schedule_cache_path(year, series_id, fmt)
+    if p.exists():
+        p.unlink(missing_ok=True)
+        return True
+    return False
+
+def drivers_cache_dir(year) -> Path:
+    """
+    <cache_dir>/drivers/<year>
+    """
+    s = get_settings()
+    d = Path(s.cache_dir) / "drivers" / _seg(year)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+def _drivers_cache_path(year, series_id, name: str, fmt: str | None = None) -> Path:
+    s = get_settings()
+    fmt = (fmt or s.df_format).lower()
+    ext = ".parquet" if fmt == "parquet" else ".csv"
+    return drivers_cache_dir(year) / f"{_sanitize(str(series_id))}_{_sanitize(name)}{ext}"
+
+def save_drivers_df(df: pd.DataFrame, *, year, series_id, name: str, fmt: str | None = None) -> Path:
+    """
+    Save: <cache_dir>/drivers/<year>/<series_id>_<name>.(csv|parquet)
+    """
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError(f"save_drivers_df expects a pandas DataFrame; got {type(df).__name__}")
+    s = get_settings()
+    path = _drivers_cache_path(year, series_id, name, fmt)
+    if not (s.cache_enabled and s.df_cache_enabled):
+        return path
+    fmt = (fmt or s.df_format).lower()
+    if fmt == "parquet":
+        try:
+            df.to_parquet(path, index=False)
+        except Exception as e:
+            raise RuntimeError("Failed to write parquet. Install 'pyarrow' or set df_format='csv'.") from e
+    elif fmt == "csv":
+        df.to_csv(path, index=False)
+    else:
+        raise ValueError("Unsupported format. Use 'csv' or 'parquet'.")
+    return path
+
+def load_drivers_df(*, year, series_id, name: str, fmt: str | None = None) -> pd.DataFrame | None:
+    """
+    Load: <cache_dir>/drivers/<year>/<series_id>_<name>.(csv|parquet)
+    """
+    s = get_settings()
+    if not (s.cache_enabled and s.df_cache_enabled):
+        return None
+    path = _drivers_cache_path(year, series_id, name, fmt)
+    if not path.exists():
+        return None
+    fmt = (fmt or s.df_format).lower()
+    if fmt == "parquet":
+        try:
+            return pd.read_parquet(path)
+        except Exception as e:
+            raise RuntimeError("Failed to read parquet. Install 'pyarrow' or use 'csv'.") from e
+    elif fmt == "csv":
+        return pd.read_csv(path)
+    else:
+        raise ValueError("Unsupported format. Use 'csv' or 'parquet'.")
+
+def has_drivers_df(*, year, series_id, name: str, fmt: str | None = None) -> bool:
+    return _drivers_cache_path(year, series_id, name, fmt).exists()
+
+def clear_drivers_df(*, year, series_id, name: str, fmt: str | None = None) -> bool:
+    p = _drivers_cache_path(year, series_id, name, fmt)
+    if p.exists():
+        p.unlink(missing_ok=True)
+        return True
+    return False

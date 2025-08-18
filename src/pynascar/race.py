@@ -41,6 +41,7 @@ class Race:
         self.distance = None
         self.lap_count = None
         self.drivers = pd.DataFrame()
+        self.driver_stats_advanced = pd.DataFrame()
 
         # Stage Results. Currently shows only the top 10
         self.stage_1_results = None
@@ -56,6 +57,7 @@ class Race:
         self.fetch_events()
         self.get_race_data()
         self.get_driver_stats()
+        self.get_advanced_driver_stats()
 
 
     def get_race_data(self):
@@ -97,16 +99,20 @@ class Race:
                  return
             
             url = f"https://cf.nascar.com/cacher/{self.year}/{self.series_id}/{self.race_id}/weekend-feed.json"
-            print(f'Fetching data for {self.year}-{self.series_id}-{self.race_id}')
+            print(f'Fetching data for Year:{self.year} Series: {self.series_id} Race: {self.race_id}')
         else:
             url = f"https://cf.nascar.com/cacher/live/series_{self.series_id}/{self.race_id}/weekend-feed.json"
-            print(f'Loading live data for: {self.year}-{self.series_id}-{self.race_id}')
+            print(f'Loading live data for: Year:{self.year} Series: {self.series_id} Race: {self.race_id}')
 
         response = requests.get(url)
         if response.status_code == 200:
             data = response.json()
-            weekend = data.get('weekend_race', [])[0]
-            weekend_runs = data.get('weekend_runs', [])
+            try:
+                weekend = data.get('weekend_race', [])[0]
+                weekend_runs = data.get('weekend_runs', [])
+            except:
+                weekend = {}
+                weekend_runs = []
 
             self.race_time = weekend.get('total_race_time')
             self.distance = weekend.get('scheduled_distance')
@@ -436,6 +442,7 @@ class Race:
     
     def get_driver_stats(self):
         #https://cf.nascar.com/loopstats/prod/2023/2/5314.json
+        #https://cf.nascar.com/cacher/live/series_2/5314/live-feed.json
         if not self.live:
             cached_driver_stats = load_df("driver_stats", year=self.year, series_id=self.series_id, race_id=self.race_id)
             if cached_driver_stats is not None:
@@ -443,6 +450,7 @@ class Race:
                 return
             
         url = f"https://cf.nascar.com/loopstats/prod/{self.year}/{self.series_id}/{self.race_id}.json"
+        
         response = requests.get(url)
         if response.status_code == 200:
             data = response.json()
@@ -474,6 +482,53 @@ class Race:
                 })
             
             self.drivers = pd.DataFrame(driver_list) if driver_list else pd.DataFrame()
-            self.drivers['driver_name'] = self.drivers['driver_id'].map(self.results.set_index('driver_id')['driver']) if not self.drivers.empty else None
+            if not self.drivers.empty and isinstance(self.results, pd.DataFrame) and not self.results.empty:
+                name_map_df = (
+                    self.results[['driver_id', 'driver']]
+                    .dropna(subset=['driver_id', 'driver'])
+                    .astype({'driver_id': 'Int64'})
+                    .drop_duplicates(subset=['driver_id'], keep='first')
+                )
+                name_map = name_map_df.set_index('driver_id')['driver']
+                self.drivers['driver_name'] = self.drivers['driver_id'].astype('Int64').map(name_map)
             if not self.live:
                 save_df("driver_stats", self.drivers, year=self.year, series_id=self.series_id, race_id=self.race_id)
+
+    def get_advanced_driver_stats(self):
+        # Implement the logic to retrieve advanced driver stats
+        if not self.live:
+            cached_driver_stats_advanced = load_df("driver_stats_advanced", year=self.year, series_id=self.series_id, race_id=self.race_id)
+            if cached_driver_stats_advanced is not None:
+                self.driver_stats_advanced = cached_driver_stats_advanced
+                return
+            
+        url = f"https://cf.nascar.com/cacher/live/series_{self.series_id}/{self.race_id}/live-feed.json"
+
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            # Process the advanced driver stats data
+            vehicles = data.get('vehicles', [])
+            driver_stats_advanced = []
+            for vehicle in vehicles:
+                driver = vehicle.get('driver', {})
+                driver_stats_advanced.append({
+                    'driver_id': driver.get('driver_id'),
+                    'driver_name': driver.get('full_name'),
+                    'vehicle_number': vehicle.get('vehicle_number'),
+                    'vehicle_manufacturer': vehicle.get('vehicle_manufacturer'),
+                    'sponsor_name': vehicle.get('sponsor_name'),
+                    'best_lap': vehicle.get('best_lap'),
+                    'best_lap_speed': vehicle.get('best_lap_speed'),
+                    'best_lap_time': vehicle.get('best_lap_time'),
+                    'laps_position_improved': vehicle.get('laps_position_improved'),
+                    "fastest_laps_run": vehicle.get("fastest_laps_run"),
+                    'passes_made': vehicle.get('passes_made'),
+                    "times_passed": vehicle.get("times_passed"),
+                    'passing_differential': vehicle.get('passing_differential'),
+                    "quality_passes": vehicle.get("quality_passes"),
+                    'position_differential_last_10_percent': vehicle.get('position_differential_last_10_percent'),
+                })
+            self.driver_stats_advanced = pd.DataFrame(driver_stats_advanced)
+        else:
+            self.driver_stats_advanced = pd.DataFrame()

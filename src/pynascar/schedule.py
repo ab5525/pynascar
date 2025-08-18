@@ -2,6 +2,7 @@
 import warnings
 import pandas as pd
 import requests
+from .caching import load_schedule, save_schedule
 
 # endpoint for race list
 #https://cf.nascar.com/cacher/2023/race_list_basic.json
@@ -25,9 +26,16 @@ class Schedule:
 
     def fetch_races(self):
         """Fetch the race list for the specified year and series ID."""
+        cached_schedule = load_schedule(year=self.year, series_id=self.series_id)
+        if cached_schedule is not None:
+            self.data = cached_schedule
+            self.races = self.data.to_dict(orient="records")
+            return
+
         url = f"https://cf.nascar.com/cacher/{self.year}/race_list_basic.json"
         response = requests.get(url)
         if response.status_code == 200:
+            print(f"Fetching data for Year:{self.year} Series:{self.series_id}")
             data = response.json()
             # Filter the races by series ID
             race_list = data[f'series_{self.series_id}']
@@ -37,16 +45,17 @@ class Schedule:
                 self.data["scheduled_at"] = pd.to_datetime(
                         self.data["race_date"], errors="coerce", utc=True
                     )
+            save_schedule(self.data, year=self.year, series_id=self.series_id)
         else:
             warnings.warn(f"Failed to fetch race list: {response.status_code}")
     
     def completed_races(self):
         """Return a list of completed races."""
-        return self.get_finished_races()['race_name'].tolist()
+        return self.get_finished_races()['race_name'].tolist(),self.get_finished_races()['race_id'].tolist()
 
     def remaining_races(self):
         """Return a list of remaining races."""
-        return self.get_remaining_races()['race_name'].tolist()
+        return self.get_remaining_races()['race_name'].tolist(),self.get_remaining_races()['race_id'].tolist()
 
     def most_recent_race(self) -> pd.DataFrame:
         """Return a DataFrame with a single row for the most recent completed race."""
