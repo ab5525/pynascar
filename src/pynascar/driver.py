@@ -234,28 +234,51 @@ class Driver:
             return
         if not isinstance(res, pd.DataFrame) or res.empty:
             return
-        if "driver" in res.columns:
-            name_col = "driver"
-        elif "Driver" in res.columns:
-            name_col = "Driver"
-        else:
-            name_col = None
-        if name_col is None or "driver_id" not in res.columns:
+        if "Driver" not in pit.columns or "driver" not in res.columns or "driver_id" not in res.columns:
             return
-        map_name_to_id = (
-            res[[name_col, "driver_id"]]
-            .dropna()
-            .drop_duplicates(subset=[name_col], keep="first")
-            .set_index(name_col)["driver_id"]
-        )
+
+        # Build name map from results, stripping symbols for matching
+        def _clean_name(name):
+            if pd.isna(name):
+                return None
+            import re
+            cleaned = str(name).strip()
+            # Remove leading symbols like *, #, etc.
+            cleaned = re.sub(r'^[*#†‡§¶\s]+', '', cleaned)
+            # Remove trailing symbols like *, #, †, ‡, §, ¶
+            cleaned = re.sub(r'[*#†‡§¶\s]+$', '', cleaned)
+            # Remove parenthetical indicators like (i), (R), (#)
+            cleaned = re.sub(r'\s*\([^)]*\)\s*$', '', cleaned)
+            return cleaned.strip()
+
+        # Specific name mappings for common variations
+        name_mappings = {
+            "Daniel Suárez": "Daniel Suarez",
+            "John H. Nemechek": "John Hunter Nemechek", 
+            "Ricky Stenhouse Jr": "Ricky Stenhouse Jr.",
+            # Add more as needed
+        }
+
+        def _normalize_name(name):
+            cleaned = _clean_name(name)
+            if cleaned in name_mappings:
+                return name_mappings[cleaned]
+            return cleaned
+
+        # Create clean name to driver_id mapping from results
+        res_clean = res[["driver", "driver_id"]].dropna().copy()
+        res_clean["clean_name"] = res_clean["driver"].apply(_normalize_name)
+        name_map = res_clean.drop_duplicates("clean_name").set_index("clean_name")["driver_id"]
+
+        # Map pit stops to driver_id using cleaned names
         work = pit.copy()
-        drv_col = "Driver" if "Driver" in work.columns else None
-        if drv_col is None:
-            return
-        work["driver_id"] = work[drv_col].map(map_name_to_id)
+        work["clean_driver"] = work["Driver"].apply(_normalize_name)
+        work["driver_id"] = work["clean_driver"].map(name_map)
+        
         mine = work[work["driver_id"] == self.driver_id].copy()
         if mine.empty:
             return
+
         mine["race_id"] = race_id
         self.pit_stops_df = pd.concat([self.pit_stops_df, mine], ignore_index=True) if not self.pit_stops_df.empty else mine
 
