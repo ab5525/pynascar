@@ -3,6 +3,7 @@ import warnings
 import pandas as pd
 import requests
 from .caching import load_schedule, save_schedule
+from .definitions import tracks_map
 
 # endpoint for race list
 #https://cf.nascar.com/cacher/2023/race_list_basic.json
@@ -45,6 +46,9 @@ class Schedule:
                 self.data["scheduled_at"] = pd.to_datetime(
                         self.data["race_date"], errors="coerce", utc=True
                     )
+            
+            self.data["track_type"] = self.data["track_name"].map(tracks_map).fillna("unknown")
+
             save_schedule(self.data, year=self.year, series_id=self.series_id)
         else:
             warnings.warn(f"Failed to fetch race list: {response.status_code}")

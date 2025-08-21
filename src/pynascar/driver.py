@@ -36,6 +36,8 @@ class Driver:
     driver_id: int
     name: Optional[str] = None
     team: Optional[str] = None
+    car_number: Optional[str] = None
+    manufacturer: Optional[str] = None
     stats_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     adv_stats_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     averages: pd.Series = field(default_factory=lambda: pd.Series(dtype="float64"))
@@ -53,16 +55,62 @@ class Driver:
         }
         found_any = False
 
-        # Results-derived fields
+        # First, determine if the driver actually participated in this race
+        participated = False
+        r = None
         if isinstance(self.results_rows, pd.DataFrame) and not self.results_rows.empty:
             r = self.results_rows[self.results_rows.get("race_id") == race_id]
             if not r.empty:
-                r = r.iloc[0]
-                for col in ("qualifying_position", "qualifying_speed", "points", "playoff_points", "laps_completed"):
-                    if col in r.index:
-                        row[col] = r[col]
-                        found_any = True
+                r0 = r.iloc[0]
+                laps_c = pd.to_numeric(r0.get("laps_completed"), errors="coerce")
+                fin_pos = pd.to_numeric(r0.get("finishing_position"), errors="coerce")
+                # Consider "participated" if they have a classified finish or completed any lap
+                participated = (pd.notna(fin_pos)) or (pd.notna(laps_c) and laps_c > 0)
 
+        # Fallback evidence: any laps, pit stops, or stage results for this race
+        if not participated and isinstance(self.lap_speed_summary, pd.DataFrame) and not self.lap_speed_summary.empty:
+            participated = not self.lap_speed_summary[self.lap_speed_summary.get("race_id") == race_id].empty
+        if not participated and isinstance(self.pit_stops_df, pd.DataFrame) and not self.pit_stops_df.empty:
+            participated = not self.pit_stops_df[self.pit_stops_df.get("race_id") == race_id].empty
+        if not participated and isinstance(self.stage_rows, pd.DataFrame) and not self.stage_rows.empty:
+            participated = not self.stage_rows[self.stage_rows.get("race_id") == race_id].empty
+
+        if not participated:
+            return None
+
+        # Results-derived fields (only after we know they participated)
+        if r is not None and not r.empty:
+            r = r.iloc[0]
+            for col in (
+                "qualifying_position",
+                "qualifying_speed",
+                "points",
+                "playoff_points",
+                "laps_completed",
+                "starting_position",
+                "finishing_position",
+            ):
+                if col in r.index:
+                    row[col] = r[col]
+                    found_any = True
+            # Include manufacturer and car number when present in result row
+            if "manufacturer" in r.index and pd.notna(r["manufacturer"]):
+                row["manufacturer"] = r["manufacturer"]
+            car = None
+            if "car_number" in r.index and pd.notna(r["car_number"]):
+                car = r["car_number"]
+            elif "driver_number" in r.index and pd.notna(r["driver_number"]):
+                car = r["driver_number"]
+            if car is None and self.car_number is not None:
+                car = self.car_number
+            if car is not None:
+                row["car_number"] = str(car)
+
+        # Backfill only for display; do not change participation logic
+        if "manufacturer" not in row or pd.isna(row.get("manufacturer")):
+            if self.manufacturer is not None:
+                row["manufacturer"] = self.manufacturer
+        
         # Always include stage fields with 0 defaults (top-10 cutoff)
         row["stage1_position"] = 0
         row["stage1_points"] = 0.0
@@ -155,9 +203,36 @@ class Driver:
         row = res[res["driver_id"] == self.driver_id]
         if row.empty:
             return
-        cols = [c for c in ("qualifying_position", "qualifying_speed", "points", "playoff_points", "laps_completed", "driver", "team") if c in row.columns]
+
+        # Skip non-starters (DNQ/DNS): no finishing_position and no laps completed
+        try:
+            r0 = row.iloc[0]
+            laps_c = pd.to_numeric(r0.get("laps_completed"), errors="coerce")
+            fin_pos = pd.to_numeric(r0.get("finishing_position"), errors="coerce")
+            started = (pd.notna(fin_pos)) or (pd.notna(laps_c) and laps_c > 0)
+            if not started:
+                return
+        except Exception:
+            pass
+
+        cols = [c for c in (
+            "qualifying_position",
+            "qualifying_speed",
+            "points",
+            "playoff_points",
+            "laps_completed",
+            "starting_position",
+            "finishing_position",
+            "driver",
+            "team",
+            "manufacturer",
+            "driver_number",
+        ) if c in row.columns]
         take = row[cols].copy()
         take = take.assign(race_id=race_id)
+        if "driver_number" in take.columns and "car_number" not in take.columns:
+            with pd.option_context('mode.chained_assignment', None):
+                take["car_number"] = take["driver_number"].astype(str)
         self.results_rows = pd.concat([self.results_rows, take], ignore_index=True) if not self.results_rows.empty else take
         if self.name is None and "driver" in row.columns:
             n = row["driver"].dropna()
@@ -167,6 +242,14 @@ class Driver:
             t = row["team"].dropna()
             if not t.empty:
                 self.team = str(t.iloc[0])
+        if self.car_number is None and "driver_number" in row.columns:
+            dn = row["driver_number"].dropna()
+            if not dn.empty:
+                self.car_number = str(dn.iloc[0])
+        if self.manufacturer is None and "manufacturer" in row.columns:
+            m = row["manufacturer"].dropna()
+            if not m.empty:
+                self.manufacturer = str(m.iloc[0])
 
     # add stage 1/2 results (position, stage_points)
     def add_stage_results(self, stage1: Optional[pd.DataFrame], stage2: Optional[pd.DataFrame], race_id: int) -> None:
@@ -243,20 +326,15 @@ class Driver:
                 return None
             import re
             cleaned = str(name).strip()
-            # Remove leading symbols like *, #, etc.
             cleaned = re.sub(r'^[*#†‡§¶\s]+', '', cleaned)
-            # Remove trailing symbols like *, #, †, ‡, §, ¶
             cleaned = re.sub(r'[*#†‡§¶\s]+$', '', cleaned)
-            # Remove parenthetical indicators like (i), (R), (#)
             cleaned = re.sub(r'\s*\([^)]*\)\s*$', '', cleaned)
             return cleaned.strip()
 
-        # Specific name mappings for common variations
         name_mappings = {
             "Daniel Suárez": "Daniel Suarez",
-            "John H. Nemechek": "John Hunter Nemechek", 
+            "John H. Nemechek": "John Hunter Nemechek",
             "Ricky Stenhouse Jr": "Ricky Stenhouse Jr.",
-            # Add more as needed
         }
 
         def _normalize_name(name):
@@ -265,40 +343,44 @@ class Driver:
                 return name_mappings[cleaned]
             return cleaned
 
-        # Create clean name to driver_id mapping from results
-        res_clean = res[["driver", "driver_id"]].dropna().copy()
+        # Create clean name maps from results (include number/manufacturer when present)
+        res_cols = ["driver", "driver_id"]
+        if "driver_number" in res.columns:
+            res_cols.append("driver_number")
+        if "manufacturer" in res.columns:
+            res_cols.append("manufacturer")
+        res_clean = res[res_cols].dropna(subset=["driver", "driver_id"]).copy()
         res_clean["clean_name"] = res_clean["driver"].apply(_normalize_name)
-        name_map = res_clean.drop_duplicates("clean_name").set_index("clean_name")["driver_id"]
 
-        # Map pit stops to driver_id using cleaned names
+        name_to_id = res_clean.drop_duplicates("clean_name").set_index("clean_name")["driver_id"]
+        name_to_num = res_clean.drop_duplicates("clean_name").set_index("clean_name")["driver_number"] if "driver_number" in res_clean.columns else None
+        name_to_man = res_clean.drop_duplicates("clean_name").set_index("clean_name")["manufacturer"] if "manufacturer" in res_clean.columns else None
+
+        # Map pit stops to driver_id + enrich with car_number/manufacturer
         work = pit.copy()
         work["clean_driver"] = work["Driver"].apply(_normalize_name)
-        work["driver_id"] = work["clean_driver"].map(name_map)
-        
+        work["driver_id"] = work["clean_driver"].map(name_to_id)
+
+        # car_number: prefer mapping from results
+        if name_to_num is not None:
+            work["car_number"] = work["clean_driver"].map(name_to_num).astype("string")
+        # manufacturer: prefer pit's Manufacturer, else fallback to results
+        if "Manufacturer" in work.columns:
+            work["manufacturer"] = work["Manufacturer"]
+        elif name_to_man is not None:
+            work["manufacturer"] = work["clean_driver"].map(name_to_man)
+
         mine = work[work["driver_id"] == self.driver_id].copy()
         if mine.empty:
             return
 
         mine["race_id"] = race_id
+        # Ensure consistent types
+        if "car_number" in mine.columns:
+            mine["car_number"] = mine["car_number"].astype("string")
         self.pit_stops_df = pd.concat([self.pit_stops_df, mine], ignore_index=True) if not self.pit_stops_df.empty else mine
 
     def total_races(self) -> int:
-        # race_ids = set()
-        # candidates = [
-        #     self.results_rows,      # expects 'race_id'
-        #     self.stage_rows,        # expects 'race_id'
-        #     self.lap_speed_summary, # expects 'race_id'
-        #     self.pit_stops_df,      # expects 'race_id'
-        #     self.stats_df,          # may have 'race_id'
-        #     self.adv_stats_df,      # may have 'race_id'
-        # ]
-        # for df in candidates:
-        #     if isinstance(df, pd.DataFrame) and not df.empty and "race_id" in df.columns:
-        #         vals = pd.to_numeric(df["race_id"], errors="coerce").dropna().astype(int).unique().tolist()
-        #         race_ids.update(vals)
-
-        # return len(race_ids)
-
         race_count = len(self.results_rows)
         return race_count
         
@@ -549,7 +631,12 @@ class DriversData:
 
         rows = []
         for did, d in self.drivers.items():
-            row = {"driver_id": did, "driver_name": d.name}
+            row = {
+                "driver_id": did,
+                "driver_name": d.name,
+                "car_number": d.car_number,
+                "manufacturer": d.manufacturer,
+            }
             if isinstance(d.averages, pd.Series) and not d.averages.empty:
                 row.update({str(k): v for k, v in d.averages.items()})
             rows.append(row)
@@ -610,13 +697,15 @@ class DriversData:
             df = d.pit_stops_df.copy()
             if race_id is not None:
                 df = df[df.get("race_id") == race_id]
-            # Ensure driver_id/name present
             if "driver_id" not in df.columns:
                 df["driver_id"] = driver_id
             if "driver_name" not in df.columns:
                 df["driver_name"] = d.name
+            # Ensure normalized manufacturer field exists
+            if "manufacturer" not in df.columns and "Manufacturer" in df.columns:
+                df["manufacturer"] = df["Manufacturer"]
             # Order helpful columns first
-            first = [c for c in ["race_id", "driver_id", "driver_name"] if c in df.columns]
+            first = [c for c in ["race_id", "driver_id", "driver_name", "car_number", "manufacturer"] if c in df.columns]
             rest = [c for c in df.columns if c not in first]
             return df[first + rest].sort_values(["race_id"], ignore_index=True)
 
@@ -632,7 +721,9 @@ class DriversData:
             if "driver" not in res.columns or "driver_id" not in res.columns or "Driver" not in pit.columns:
                 continue
             name_to_id = res[["driver", "driver_id"]].dropna().drop_duplicates("driver").set_index("driver")["driver_id"]
-            # Map pit rows to driver_id
+            name_to_num = res[["driver", "driver_number"]].dropna().drop_duplicates("driver").set_index("driver")["driver_number"] if "driver_number" in res.columns else None
+            name_to_man = res[["driver", "manufacturer"]].dropna().drop_duplicates("driver").set_index("driver")["manufacturer"] if "manufacturer" in res.columns else None
+
             work = pit.copy()
             work["driver_id"] = work["Driver"].map(name_to_id)
             work = work[work["driver_id"] == driver_id].copy()
@@ -640,10 +731,16 @@ class DriversData:
                 continue
             work["race_id"] = rid
             work["driver_name"] = work["Driver"]
+            if name_to_num is not None:
+                work["car_number"] = work["Driver"].map(name_to_num).astype("string")
+            if "Manufacturer" in work.columns:
+                work["manufacturer"] = work["Manufacturer"]
+            elif name_to_man is not None:
+                work["manufacturer"] = work["Driver"].map(name_to_man)
             rows.append(work)
         if rows:
             df = pd.concat(rows, ignore_index=True)
-            first = [c for c in ["race_id", "driver_id", "driver_name"] if c in df.columns]
+            first = [c for c in ["race_id", "driver_id", "driver_name", "car_number", "manufacturer"] if c in df.columns]
             rest = [c for c in df.columns if c not in first]
             return df[first + rest].sort_values(["race_id"], ignore_index=True)
         return pd.DataFrame()
@@ -659,14 +756,22 @@ class DriversData:
         if not isinstance(pit, pd.DataFrame) or pit.empty:
             return pd.DataFrame()
         df = pit.copy()
-        # Map names to ids when possible
+        # Map names to ids/numbers/manufacturer when possible
         if isinstance(res, pd.DataFrame) and not res.empty and "driver" in res.columns and "driver_id" in res.columns and "Driver" in df.columns:
             name_to_id = res[["driver", "driver_id"]].dropna().drop_duplicates("driver").set_index("driver")["driver_id"]
             df["driver_id"] = df["Driver"].map(name_to_id)
+            if "driver_number" in res.columns:
+                name_to_num = res[["driver", "driver_number"]].dropna().drop_duplicates("driver").set_index("driver")["driver_number"]
+                df["car_number"] = df["Driver"].map(name_to_num).astype("string")
+            if "manufacturer" in res.columns and "manufacturer" not in df.columns:
+                name_to_man = res[["driver", "manufacturer"]].dropna().drop_duplicates("driver").set_index("driver")["manufacturer"]
+                df["manufacturer"] = df["Driver"].map(name_to_man)
+        # Normalize manufacturer field to lower-case column name as alias
+        if "manufacturer" not in df.columns and "Manufacturer" in df.columns:
+            df["manufacturer"] = df["Manufacturer"]
         if "driver_name" not in df.columns and "Driver" in df.columns:
             df["driver_name"] = df["Driver"]
         df["race_id"] = race_id
-        # Order helpful columns first
-        first = [c for c in ["race_id", "driver_id", "driver_name"] if c in df.columns]
+        first = [c for c in ["race_id", "driver_id", "driver_name", "car_number", "manufacturer"] if c in df.columns]
         rest = [c for c in df.columns if c not in first]
         return df[first + rest].reset_index(drop=True)

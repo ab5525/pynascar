@@ -22,6 +22,7 @@ dependencies = [
     "pandas>=2.3.1",
     "pyarrow>=21.0.0",
     "requests>=2.32.4",
+    "seaborn>=0.13.2",
 ]
 
 [project.optional-dependencies]
