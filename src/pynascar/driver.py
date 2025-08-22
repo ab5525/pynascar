@@ -634,6 +634,7 @@ class DriversData:
             row = {
                 "driver_id": did,
                 "driver_name": d.name,
+                "team": d.team,                   # <— include team
                 "car_number": d.car_number,
                 "manufacturer": d.manufacturer,
             }
