@@ -31,6 +31,14 @@ def _drop_avg_columns(df: pd.DataFrame) -> pd.DataFrame:
     drop_cols = [c for c in df.columns if c.startswith("avg_")]
     return df.drop(columns=drop_cols, errors="ignore")
 
+def _filter_by_race(df: pd.DataFrame, race_id: int) -> pd.DataFrame:
+    """Safe filter by race_id; returns empty DataFrame if column missing."""
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return pd.DataFrame()
+    if "race_id" not in df.columns:
+        return pd.DataFrame()
+    return df.loc[df["race_id"] == race_id]
+
 @dataclass
 class Driver:
     driver_id: int
@@ -46,6 +54,33 @@ class Driver:
     lap_speed_summary: pd.DataFrame = field(default_factory=pd.DataFrame)
     pit_stops_df: pd.DataFrame = field(default_factory=pd.DataFrame)
 
+    def _merge_cols_for_race(self, df: pd.DataFrame, race_id: int, cols: list, row: dict) -> bool:
+        sub = _filter_by_race(df, race_id)
+        if sub.empty:
+            return False
+        s0 = sub.iloc[0]
+        added = False
+        for c in cols:
+            if c in s0.index and pd.notna(s0[c]):
+                row[c] = s0[c]
+                added = True
+        return added
+
+    def _pit_aggregates_for_race(self, race_id: int) -> pd.DataFrame:
+        p = _filter_by_race(self.pit_stops_df, race_id)
+        if p.empty:
+            return pd.DataFrame()
+        data = {
+            "race_id": race_id,
+            "total_pit_stops": int(len(p)),
+            "avg_total_duration": _nanmean(p["total_duration"]) if "total_duration" in p.columns else None,
+            "avg_pit_stop_duration": _nanmean(p["pit_stop_duration"]) if "pit_stop_duration" in p.columns else None,
+            "avg_in_travel_duration": _nanmean(p["in_travel_duration"]) if "in_travel_duration" in p.columns else None,
+            "avg_out_travel_duration": _nanmean(p["out_travel_duration"]) if "out_travel_duration" in p.columns else None,
+            "avg_positions_gained_lost": _nanmean(p["positions_gained_lost"]) if "positions_gained_lost" in p.columns else None,
+        }
+        return pd.DataFrame([data])
+
     def get_race_row(self, race_id: int) -> Optional[dict]:
         row = {
             "race_id": race_id,
@@ -55,122 +90,109 @@ class Driver:
         }
         found_any = False
 
-        # First, determine if the driver actually participated in this race
+        # Determine participation
+        r = _filter_by_race(self.results_rows, race_id)
         participated = False
-        r = None
-        if isinstance(self.results_rows, pd.DataFrame) and not self.results_rows.empty:
-            r = self.results_rows[self.results_rows.get("race_id") == race_id]
-            if not r.empty:
-                r0 = r.iloc[0]
-                laps_c = pd.to_numeric(r0.get("laps_completed"), errors="coerce")
-                fin_pos = pd.to_numeric(r0.get("finishing_position"), errors="coerce")
-                # Consider "participated" if they have a classified finish or completed any lap
-                participated = (pd.notna(fin_pos)) or (pd.notna(laps_c) and laps_c > 0)
-
-        # Fallback evidence: any laps, pit stops, or stage results for this race
-        if not participated and isinstance(self.lap_speed_summary, pd.DataFrame) and not self.lap_speed_summary.empty:
-            participated = not self.lap_speed_summary[self.lap_speed_summary.get("race_id") == race_id].empty
-        if not participated and isinstance(self.pit_stops_df, pd.DataFrame) and not self.pit_stops_df.empty:
-            participated = not self.pit_stops_df[self.pit_stops_df.get("race_id") == race_id].empty
-        if not participated and isinstance(self.stage_rows, pd.DataFrame) and not self.stage_rows.empty:
-            participated = not self.stage_rows[self.stage_rows.get("race_id") == race_id].empty
-
+        if not r.empty:
+            r0 = r.iloc[0]
+            laps_c = pd.to_numeric(r0.get("laps_completed"), errors="coerce")
+            fin_pos = pd.to_numeric(r0.get("finishing_position"), errors="coerce")
+            participated = (pd.notna(fin_pos)) or (pd.notna(laps_c) and laps_c > 0)
+        if not participated and not _filter_by_race(self.lap_speed_summary, race_id).empty:
+            participated = True
+        if not participated and not _filter_by_race(self.pit_stops_df, race_id).empty:
+            participated = True
+        if not participated and not _filter_by_race(self.stage_rows, race_id).empty:
+            participated = True
         if not participated:
             return None
 
-        # Results-derived fields (only after we know they participated)
-        if r is not None and not r.empty:
-            r = r.iloc[0]
-            for col in (
-                "qualifying_position",
-                "qualifying_speed",
-                "points",
-                "playoff_points",
-                "laps_completed",
-                "starting_position",
-                "finishing_position",
-            ):
-                if col in r.index:
-                    row[col] = r[col]
-                    found_any = True
-            # Include manufacturer and car number when present in result row
-            if "manufacturer" in r.index and pd.notna(r["manufacturer"]):
-                row["manufacturer"] = r["manufacturer"]
-            car = None
-            if "car_number" in r.index and pd.notna(r["car_number"]):
-                car = r["car_number"]
-            elif "driver_number" in r.index and pd.notna(r["driver_number"]):
-                car = r["driver_number"]
-            if car is None and self.car_number is not None:
-                car = self.car_number
-            if car is not None:
-                row["car_number"] = str(car)
+        # Results merge
+        found_any |= self._merge_cols_for_race(
+            self.results_rows, race_id,
+            [
+                "qualifying_position", "qualifying_speed", "points", "playoff_points",
+                "laps_completed", "starting_position", "finishing_position",
+                "manufacturer", "car_number",
+            ],
+            row,
+        )
+        if "car_number" not in row and not r.empty and "driver_number" in r.columns:
+            dn = r.iloc[0].get("driver_number")
+            if pd.notna(dn):
+                row["car_number"] = str(dn); found_any = True
 
-        # Backfill only for display; do not change participation logic
-        if "manufacturer" not in row or pd.isna(row.get("manufacturer")):
-            if self.manufacturer is not None:
-                row["manufacturer"] = self.manufacturer
-        
-        # Always include stage fields with 0 defaults (top-10 cutoff)
-        row["stage1_position"] = 0
-        row["stage1_points"] = 0.0
-        row["stage2_position"] = 0
-        row["stage2_points"] = 0.0
+        # Loop/advanced stats merge
+        wanted_cols = [
+            "mid_position", "closing_position", "closing_laps_diff",
+            "best_position", "worst_position", "avg_position",
+            "passes_green_flag", "passing_diff", "passed_green_flag",
+            "quality_passes", "fast_laps", "top15_laps",
+        ]
+        found_any |= self._merge_cols_for_race(self.stats_df, race_id, wanted_cols, row)
+        found_any |= self._merge_cols_for_race(self.adv_stats_df, race_id, wanted_cols, row)
 
-        # Stage 1/2 overrides when present and position <= 10
-        if isinstance(self.stage_rows, pd.DataFrame) and not self.stage_rows.empty:
-            s = self.stage_rows[self.stage_rows.get("race_id") == race_id]
-            if not s.empty:
-                s1 = s[s.get("stage") == 1]
-                if not s1.empty:
-                    r1 = s1.iloc[0]
-                    pos1 = pd.to_numeric(r1.get("position"), errors="coerce")
-                    pts1 = pd.to_numeric(r1.get("stage_points"), errors="coerce")
-                    row["stage1_position"] = int(pos1) if pd.notna(pos1) and int(pos1) <= 10 else 0
-                    row["stage1_points"] = float(pts1) if pd.notna(pts1) and row["stage1_position"] > 0 else 0.0
-                    found_any = True
-                s2 = s[s.get("stage") == 2]
-                if not s2.empty:
-                    r2 = s2.iloc[0]
-                    pos2 = pd.to_numeric(r2.get("position"), errors="coerce")
-                    pts2 = pd.to_numeric(r2.get("stage_points"), errors="coerce")
-                    row["stage2_position"] = int(pos2) if pd.notna(pos2) and int(pos2) <= 10 else 0
-                    row["stage2_points"] = float(pts2) if pd.notna(pts2) and row["stage2_position"] > 0 else 0.0
-                    found_any = True
+        # No closing_position fallback
 
-        # Lap speed summary: include per-race metrics
-        if isinstance(self.lap_speed_summary, pd.DataFrame) and not self.lap_speed_summary.empty:
-            l = self.lap_speed_summary[self.lap_speed_summary.get("race_id") == race_id]
-            if not l.empty:
-                l = l.iloc[0]
-                for col in ("leader_laps", "avg_speed_rank", "laps_completed_pct"):
-                    if col in l.index:
-                        row[col] = l[col]
-                        found_any = True
+        # Backfill identifiers
+        if "manufacturer" not in row and self.manufacturer is not None:
+            row["manufacturer"] = self.manufacturer
+        if "car_number" not in row and self.car_number is not None:
+            row["car_number"] = self.car_number
 
-        # Pit stops: include per-race averages and total count
-        row["total_pit_stops"] = 0
-        if isinstance(self.pit_stops_df, pd.DataFrame) and not self.pit_stops_df.empty:
-            p = self.pit_stops_df[self.pit_stops_df.get("race_id") == race_id]
-            if isinstance(p, pd.DataFrame) and not p.empty:
-                row["total_pit_stops"] = int(len(p))
-                for col, out_name in [
-                    ("total_duration", "avg_total_duration"),
-                    ("pit_stop_duration", "avg_pit_stop_duration"),
-                    ("in_travel_duration", "avg_in_travel_duration"),
-                    ("out_travel_duration", "avg_out_travel_duration"),
-                    ("positions_gained_lost", "avg_positions_gained_lost"),
-                    # Optional columns if present in schema:
-                    # ("pit_in_race_time", "avg_pit_in_race_time"),
-                    # ("pit_out_race_time", "avg_pit_out_race_time"),
-                    # ("box_stop_race_time", "avg_box_stop_race_time"),
-                    # ("box_leave_race_time", "avg_box_leave_race_time"),
-                ]:
-                    if col in p.columns:
-                        row[out_name] = _nanmean(p[col])
-                        found_any = True
+        # Stage results
+        row["stage1_position"] = 0; row["stage1_points"] = 0.0
+        row["stage2_position"] = 0; row["stage2_points"] = 0.0
+        s = _filter_by_race(self.stage_rows, race_id)
+        if not s.empty and "stage" in s.columns:
+            s1 = s.loc[s["stage"] == 1]
+            if not s1.empty:
+                r1 = s1.iloc[0]
+                pos1 = pd.to_numeric(r1.get("position"), errors="coerce")
+                pts1 = pd.to_numeric(r1.get("stage_points"), errors="coerce")
+                row["stage1_position"] = int(pos1) if pd.notna(pos1) and int(pos1) <= 10 else 0
+                row["stage1_points"] = float(pts1) if pd.notna(pts1) and row["stage1_position"] > 0 else 0.0
+                found_any = True
+            s2 = s.loc[s["stage"] == 2]
+            if not s2.empty:
+                r2 = s2.iloc[0]
+                pos2 = pd.to_numeric(r2.get("position"), errors="coerce")
+                pts2 = pd.to_numeric(r2.get("stage_points"), errors="coerce")
+                row["stage2_position"] = int(pos2) if pd.notna(pos2) and int(pos2) <= 10 else 0
+                row["stage2_points"] = float(pts2) if pd.notna(pts2) and row["stage2_position"] > 0 else 0.0
+                found_any = True
 
-        return row if found_any else None
+        # Lap-speed summary merge
+        found_any |= self._merge_cols_for_race(
+            self.lap_speed_summary, race_id,
+            ["leader_laps", "avg_speed_rank", "laps_completed_pct"],
+            row,
+        )
+
+        # Pit aggregates merge
+        pit_agg = self._pit_aggregates_for_race(race_id)
+        found_any |= self._merge_cols_for_race(
+            pit_agg, race_id,
+            ["total_pit_stops", "avg_total_duration", "avg_pit_stop_duration",
+             "avg_in_travel_duration", "avg_out_travel_duration", "avg_positions_gained_lost"],
+            row,
+        )
+
+        # Ensure all requested keys are present
+        ensure = wanted_cols + [
+            "manufacturer", "car_number",
+            "leader_laps", "avg_speed_rank", "laps_completed_pct",
+            "total_pit_stops", "avg_total_duration", "avg_pit_stop_duration",
+            "avg_in_travel_duration", "avg_out_travel_duration", "avg_positions_gained_lost",
+            "qualifying_position", "qualifying_speed", "points", "playoff_points",
+            "laps_completed", "starting_position", "finishing_position",
+            "stage1_position", "stage1_points", "stage2_position", "stage2_points",
+        ]
+        for c in ensure:
+            if c not in row:
+                row[c] = None
+
+        return row
 
     def add_stats(self, df: pd.DataFrame) -> None:
         if df is None or df.empty or "driver_id" not in df.columns:
@@ -571,6 +593,13 @@ class DriversData:
                 if missing_stats and missing_adv:
                     continue
 
+            if isinstance(stats, pd.DataFrame) and not stats.empty and "race_id" not in stats.columns:
+                stats = stats.copy()
+                stats["race_id"] = race_id
+            if isinstance(adv, pd.DataFrame) and not adv.empty and "race_id" not in adv.columns:
+                adv = adv.copy()
+                adv["race_id"] = race_id
+
             driver_ids = set()
             if isinstance(stats, pd.DataFrame) and not stats.empty and "driver_id" in stats.columns:
                 driver_ids.update(stats["driver_id"].dropna().astype(int).unique().tolist())
@@ -612,6 +641,8 @@ class DriversData:
                 if per_race_rows:
                     per_race_df = pd.DataFrame(per_race_rows)
                     save_drivers_df(per_race_df, year=year, series_id=series_id, name="per_race")
+                    # Keep in memory so the notebook can inspect it right away
+                    out.per_race_cache = per_race_df.copy()
             except Exception:
                 pass
 
