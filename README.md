@@ -75,14 +75,14 @@ Race Laps:
 race_data.laps
 ```
 
-| Index   | Driver          | Car | Manufacturer | lap | time                      | speed   | Pos |
-| ---- | --------------- | --- | ------------ | --- | ------------------------- | ------- | --- |
-| 2527 | Daniel Suarez   | 99  | Chv          | 100 | 0 days 00:00:00.000000047 | 189.861 | 13  |
-| 1586 | Austin Cindric  | 2   | Frd          | 171 | 0 days 00:00:00.000000046 | 193.861 | 1   |
-| 3694 | Justin Haley    | 7   | Chv          | 54  | 0 days 00:00:00.000000047 | 190.010 | 39  |
-| 54   | Bubba Wallace   | 23  | Tyt          | 1   | 0 days 00:00:00.000000052 | 172.206 | 3   |
-| 4389 | \* Corey LaJoie | 01  | Frd          | 143 | 0 days 00:00:00.000000047 | 188.119 | 31  |
-| 2679 | Ty Dillon       | 10  | Chv          | 50  | 0 days 00:00:00.000000047 | 191.152 | 34  |
+| Index | Driver          | Car | Manufacturer | lap | time                      | speed   | Pos |
+| ----- | --------------- | --- | ------------ | --- | ------------------------- | ------- | --- |
+| 2527  | Daniel Suarez   | 99  | Chv          | 100 | 0 days 00:00:00.000000047 | 189.861 | 13  |
+| 1586  | Austin Cindric  | 2   | Frd          | 171 | 0 days 00:00:00.000000046 | 193.861 | 1   |
+| 3694  | Justin Haley    | 7   | Chv          | 54  | 0 days 00:00:00.000000047 | 190.010 | 39  |
+| 54    | Bubba Wallace   | 23  | Tyt          | 1   | 0 days 00:00:00.000000052 | 172.206 | 3   |
+| 4389  | \* Corey LaJoie | 01  | Frd          | 143 | 0 days 00:00:00.000000047 | 188.119 | 31  |
+| 2679  | Ty Dillon       | 10  | Chv          | 50  | 0 days 00:00:00.000000047 | 191.152 | 34  |
 
 Race Laps:
 
@@ -98,7 +98,6 @@ race_data.pit_stops
 | Chase Briscoe  | 10  | Tyt          | 2                  | 2                   | 670.433          | 889.714           | 11618.198      | 703.315            | 12283.555           | ... | OTHER                  | False                   | False                  | False                    | False                   | 0                 | 0             | 4           | 4            | 0                     |
 | Joey Logano    | 10  | Frd          | 2                  | 2                   | 672.424          | 903.406           | 11629.899      | 700.895            | 12294.975           | ... | FOUR_WHEEL_CHANGE      | True                    | True                   | True                     | True                    | 0                 | 0             | 6           | 5            | 1                     |
 
-
 Race Events:
 
 ```python
@@ -113,8 +112,13 @@ race_data.events
 | 2   | 3   | 1          | Green   | #19, #23 and #2 get single file in front of th... | [4228, 4025, 4180]                                |
 | 3   | 5   | 1          | Green   | #77 reports fuel pressure issues and loses the... | [4326]                                            |
 
-
 ## TODO
-1: Add Caching
-2: Add Driver Stats 
-3: Add tests
+
+| #   | Item                              | Progress                    | Notes                                                                   |
+| --- | --------------------------------- | --------------------------- | ----------------------------------------------------------------------- |
+| 1   | Add Caching                       | https://progress-bar.xyz/90 | Works. Needs to prevent writing when no data                            |
+| 2   | Add Driver Stats                  | https://progress-bar.xyz/90 | Collected for stats. Works but is inefficient. Names need to be in sync |
+| 3   | Add Lap Stats                     | https://progress-bar.xyz/50 | Laps exist within Race. Will add functions to analyze                   |
+| 3   | Add Pit Stats                     | https://progress-bar.xyz/50 | Pits exist within Race and Driver. Will add functions to analyze        |
+| 4   | Add tests                         | https://progress-bar.xyz/0  | No work done                                                            |
+| 5   | Add Laps from Practice/Qualifying | https://progress-bar.xyz/0  | This end point may not exist                                            |
