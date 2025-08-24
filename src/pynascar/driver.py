@@ -90,7 +90,7 @@ class Driver:
         }
         found_any = False
 
-        # Determine participation
+        # Deterres_df participation
         r = _filter_by_race(self.results_rows, race_id)
         participated = False
         if not r.empty:
@@ -165,7 +165,7 @@ class Driver:
         # Lap-speed summary merge
         found_any |= self._merge_cols_for_race(
             self.lap_speed_summary, race_id,
-            ["leader_laps", "avg_speed_rank", "laps_completed_pct"],
+            ["leader_laps", "avg_speed_rank", "laps_completed_pct", "avg_lap_speed", "norm_speed"],
             row,
         )
 
@@ -181,7 +181,7 @@ class Driver:
         # Ensure all requested keys are present
         ensure = wanted_cols + [
             "manufacturer", "car_number",
-            "leader_laps", "avg_speed_rank", "laps_completed_pct",
+            "leader_laps", "avg_speed_rank", 'avg_lap_speed','norm_speed', "laps_completed_pct",
             "total_pit_stops", "avg_total_duration", "avg_pit_stop_duration",
             "avg_in_travel_duration", "avg_out_travel_duration", "avg_positions_gained_lost",
             "qualifying_position", "qualifying_speed", "points", "playoff_points",
@@ -305,31 +305,43 @@ class Driver:
             .drop_duplicates(subset=["driver_number"], keep="first")
             .set_index("driver_number")["driver_id"]
         )
-        work = laps.copy()
-        if "Number" not in work.columns or "lap_speed" not in work.columns or "Lap" not in work.columns:
+        working_df = laps.copy()
+        if "Number" not in working_df.columns or "lap_speed" not in working_df.columns or "Lap" not in working_df.columns:
             return
-        work["driver_number"] = work["Number"].astype(str)
-        work["lap_speed"] = pd.to_numeric(work["lap_speed"], errors="coerce")
-        work["Lap"] = pd.to_numeric(work["Lap"], errors="coerce").astype("Int64")
-        work["driver_id"] = work["driver_number"].map(map_num_to_id)
-        work = work.dropna(subset=["driver_id", "Lap", "lap_speed"])
-        if work.empty:
+        working_df["driver_number"] = working_df["Number"].astype(str)
+        working_df["lap_speed"] = pd.to_numeric(working_df["lap_speed"], errors="coerce")
+        working_df["Lap"] = pd.to_numeric(working_df["Lap"], errors="coerce").astype("Int64")
+        working_df["driver_id"] = working_df["driver_number"].map(map_num_to_id)
+        working_df = working_df.dropna(subset=["driver_id", "Lap", "lap_speed"])
+        if working_df.empty:
             return
-        work["lap_speed_max"] = work.groupby("Lap")["lap_speed"].transform("max")
-        work["lap_speed_rank"] = work.groupby("Lap")["lap_speed"].rank(ascending=False, method="min")
-        mine = work[work["driver_id"] == self.driver_id]
-        if mine.empty:
+        
+        # Get lap ranks
+        working_df["lap_speed_max"] = working_df.groupby("Lap")["lap_speed"].transform("max")
+        working_df["lap_speed_rank"] = working_df.groupby("Lap")["lap_speed"].rank(ascending=False, method="min")
+        
+        # Get the avg speed for the race
+        working_df['avg_lap_speed'] = working_df.groupby('driver_id')['lap_speed'].transform('mean')
+        working_df['normalized_lap_speed'] = working_df['avg_lap_speed'] / working_df['avg_lap_speed'].max() * 100
+
+        res_df = working_df[working_df["driver_id"] == self.driver_id]
+        if res_df.empty:
             return
-        leader_laps = int((mine["lap_speed"] == mine["lap_speed_max"]).sum())
-        avg_rank = float(mine["lap_speed_rank"].mean())
-        total_race_laps = int(work["Lap"].max()) if work["Lap"].notna().any() else None
-        laps_completed = int(mine["Lap"].count())
+        
+        leader_laps = int((res_df["lap_speed"] == res_df["lap_speed_max"]).sum())
+        avg_rank = float(res_df["lap_speed_rank"].mean())
+        total_race_laps = int(working_df["Lap"].max()) if working_df["Lap"].notna().any() else None
+        laps_completed = int(res_df["Lap"].count())
         laps_pct = (laps_completed / total_race_laps) if total_race_laps and total_race_laps > 0 else None
+        avg_speed = float(res_df["normalized_lap_speed"].mean())
+        norm_speed = float(res_df["normalized_lap_speed"].mean())
         summary = pd.DataFrame([{
             "race_id": race_id,
             "leader_laps": leader_laps,
             "avg_speed_rank": avg_rank,
-            "laps_completed_pct": laps_pct
+            "laps_completed_pct": laps_pct,
+            "avg_lap_speed": avg_speed,
+            "norm_speed": norm_speed
         }])
         self.lap_speed_summary = pd.concat([self.lap_speed_summary, summary], ignore_index=True) if not self.lap_speed_summary.empty else summary
 
@@ -379,28 +391,28 @@ class Driver:
         name_to_man = res_clean.drop_duplicates("clean_name").set_index("clean_name")["manufacturer"] if "manufacturer" in res_clean.columns else None
 
         # Map pit stops to driver_id + enrich with car_number/manufacturer
-        work = pit.copy()
-        work["clean_driver"] = work["Driver"].apply(_normalize_name)
-        work["driver_id"] = work["clean_driver"].map(name_to_id)
+        working_df = pit.copy()
+        working_df["clean_driver"] = working_df["Driver"].apply(_normalize_name)
+        working_df["driver_id"] = working_df["clean_driver"].map(name_to_id)
 
         # car_number: prefer mapping from results
         if name_to_num is not None:
-            work["car_number"] = work["clean_driver"].map(name_to_num).astype("string")
+            working_df["car_number"] = working_df["clean_driver"].map(name_to_num).astype("string")
         # manufacturer: prefer pit's Manufacturer, else fallback to results
-        if "Manufacturer" in work.columns:
-            work["manufacturer"] = work["Manufacturer"]
+        if "Manufacturer" in working_df.columns:
+            working_df["manufacturer"] = working_df["Manufacturer"]
         elif name_to_man is not None:
-            work["manufacturer"] = work["clean_driver"].map(name_to_man)
+            working_df["manufacturer"] = working_df["clean_driver"].map(name_to_man)
 
-        mine = work[work["driver_id"] == self.driver_id].copy()
-        if mine.empty:
+        res_df = working_df[working_df["driver_id"] == self.driver_id].copy()
+        if res_df.empty:
             return
 
-        mine["race_id"] = race_id
+        res_df["race_id"] = race_id
         # Ensure consistent types
-        if "car_number" in mine.columns:
-            mine["car_number"] = mine["car_number"].astype("string")
-        self.pit_stops_df = pd.concat([self.pit_stops_df, mine], ignore_index=True) if not self.pit_stops_df.empty else mine
+        if "car_number" in res_df.columns:
+            res_df["car_number"] = res_df["car_number"].astype("string")
+        self.pit_stops_df = pd.concat([self.pit_stops_df, res_df], ignore_index=True) if not self.pit_stops_df.empty else res_df
 
     def total_races(self) -> int:
         race_count = len(self.results_rows)
@@ -408,16 +420,16 @@ class Driver:
         
     
     def compute_averages(self) -> None:
-        parts = []
+        data_parts = []
         if not self.stats_df.empty:
-            parts.append(self.stats_df.select_dtypes(include=["number"]))
+            data_parts.append(self.stats_df.select_dtypes(include=["number"]))
         if not self.adv_stats_df.empty:
-            parts.append(self.adv_stats_df.select_dtypes(include=["number"]))
-        if not parts:
+            data_parts.append(self.adv_stats_df.select_dtypes(include=["number"]))
+        if not data_parts:
             self.averages = pd.Series(dtype="float64")
             return
 
-        merged = pd.concat(parts, axis=1)
+        merged = pd.concat(data_parts, axis=1)
         self.averages = merged.mean(numeric_only=True)
 
         # Stats-based helpers
@@ -457,9 +469,14 @@ class Driver:
             if "leader_laps" in self.lap_speed_summary.columns:
                 self.averages["lap_speed_leader_laps_total"] = _nansum(self.lap_speed_summary["leader_laps"])
             if "avg_speed_rank" in self.lap_speed_summary.columns:
-                self.averages["avg_lap_speed_rank"] = _nanmean(self.lap_speed_summary["avg_speed_rank"])
+                self.averages["avg_speed_rank"] = _nanmean(self.lap_speed_summary["avg_speed_rank"])
             if "laps_completed_pct" in self.lap_speed_summary.columns:
                 self.averages["avg_laps_completed_pct"] = _nanmean(self.lap_speed_summary["laps_completed_pct"])
+            if "avg_lap_speed" in self.lap_speed_summary.columns:
+                self.averages["avg_lap_speed"] = _nanmean(self.lap_speed_summary["avg_lap_speed"])
+            if "norm_speed" in self.lap_speed_summary.columns:
+                self.averages["avg_norm_speed"] = _nanmean(self.lap_speed_summary["norm_speed"])
+        # ...existing code...
 
         # Pit stop totals and averages
         if isinstance(self.pit_stops_df, pd.DataFrame) and not self.pit_stops_df.empty:
@@ -756,20 +773,20 @@ class DriversData:
             name_to_num = res[["driver", "driver_number"]].dropna().drop_duplicates("driver").set_index("driver")["driver_number"] if "driver_number" in res.columns else None
             name_to_man = res[["driver", "manufacturer"]].dropna().drop_duplicates("driver").set_index("driver")["manufacturer"] if "manufacturer" in res.columns else None
 
-            work = pit.copy()
-            work["driver_id"] = work["Driver"].map(name_to_id)
-            work = work[work["driver_id"] == driver_id].copy()
-            if work.empty:
+            working_df = pit.copy()
+            working_df["driver_id"] = working_df["Driver"].map(name_to_id)
+            working_df = working_df[working_df["driver_id"] == driver_id].copy()
+            if working_df.empty:
                 continue
-            work["race_id"] = rid
-            work["driver_name"] = work["Driver"]
+            working_df["race_id"] = rid
+            working_df["driver_name"] = working_df["Driver"]
             if name_to_num is not None:
-                work["car_number"] = work["Driver"].map(name_to_num).astype("string")
-            if "Manufacturer" in work.columns:
-                work["manufacturer"] = work["Manufacturer"]
+                working_df["car_number"] = working_df["Driver"].map(name_to_num).astype("string")
+            if "Manufacturer" in working_df.columns:
+                working_df["manufacturer"] = working_df["Manufacturer"]
             elif name_to_man is not None:
-                work["manufacturer"] = work["Driver"].map(name_to_man)
-            rows.append(work)
+                working_df["manufacturer"] = working_df["Driver"].map(name_to_man)
+            rows.append(working_df)
         if rows:
             df = pd.concat(rows, ignore_index=True)
             first = [c for c in ["race_id", "driver_id", "driver_name", "car_number", "manufacturer"] if c in df.columns]

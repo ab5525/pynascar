@@ -116,9 +116,9 @@ race_data.events
 
 | #   | Item                              | Progress                    | Notes                                                                   |
 | --- | --------------------------------- | --------------------------- | ----------------------------------------------------------------------- |
-| 1   | Add Caching                       | https://progress-bar.xyz/90 | Works. Needs to prevent writing when no data                            |
-| 2   | Add Driver Stats                  | https://progress-bar.xyz/90 | Collected for stats. Works but is inefficient. Names need to be in sync |
-| 3   | Add Lap Stats                     | https://progress-bar.xyz/50 | Laps exist within Race. Will add functions to analyze                   |
-| 3   | Add Pit Stats                     | https://progress-bar.xyz/50 | Pits exist within Race and Driver. Will add functions to analyze        |
-| 4   | Add tests                         | https://progress-bar.xyz/0  | No work done                                                            |
-| 5   | Add Laps from Practice/Qualifying | https://progress-bar.xyz/0  | This end point may not exist                                            |
+| 1   | Add Caching                       | ![90%](https://progress-bar.xyz/90) | Works. Needs to prevent writing when no data                            |
+| 2   | Add Driver Stats                  | ![90%](https://progress-bar.xyz/90) | Collected for stats. Works but is inefficient. Names need to be in sync |
+| 3   | Add Lap Stats                     | ![50%](https://progress-bar.xyz/50) | Laps exist within Race. Will add functions to analyze                   |
+| 3   | Add Pit Stats                     | ![50%](https://progress-bar.xyz/50) | Pits exist within Race and Driver. Will add functions to analyze        |
+| 4   | Add tests                         | ![0%](https://progress-bar.xyz/0) | No work done                                                            |
+| 5   | Add Laps from Practice/Qualifying | ![0%](https://progress-bar.xyz/0)  | This end point may not exist                                            |
