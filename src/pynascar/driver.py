@@ -333,7 +333,7 @@ class Driver:
         total_race_laps = int(working_df["Lap"].max()) if working_df["Lap"].notna().any() else None
         laps_completed = int(res_df["Lap"].count())
         laps_pct = (laps_completed / total_race_laps) if total_race_laps and total_race_laps > 0 else None
-        avg_speed = float(res_df["normalized_lap_speed"].mean())
+        avg_speed = float(res_df["avg_lap_speed"].mean())
         norm_speed = float(res_df["normalized_lap_speed"].mean())
         summary = pd.DataFrame([{
             "race_id": race_id,
