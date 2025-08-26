@@ -23,8 +23,8 @@ class NASCARDataProcessor:
         for i in results:
             driver_results.append({
                 'driver_id': i.get('driver_id'),
-                'driver': i.get('driver_fullname'),
-                'driver_number': i.get('car_number'),
+                'driver_name': i.get('driver_fullname'),
+                'car_number': i.get('car_number'),
                 'manufacturer': i.get('car_make'),
                 'sponsor': i.get('sponsor'),
                 'team': i.get('team_name'),
@@ -154,9 +154,9 @@ class NASCARDataProcessor:
                 manufacturer = i.get('Manufacturer')
                 for j in i.get('Laps', []):
                     lap_times.append({
-                        'Driver': driver,
-                        'Number': number,
-                        'Manufacturer': manufacturer,
+                        'driver_name': driver,
+                        'car_number': number,
+                        'manufacturer': manufacturer,
                         'Lap': j.get('Lap'),
                         'lap_time': j.get('LapTime'),
                         'lap_speed': j.get('LapSpeed'),
@@ -174,9 +174,9 @@ class NASCARDataProcessor:
         stops = []
         for i in data:
             stops.append({
-                'Driver': i.get('driver_name'),
-                'Lap': i.get('lap_count'),
-                'Manufacturer': i.get('vehicle_manufacturer'),
+                'driver_name': i.get('driver_name'),
+                'lap': i.get('lap_count'),
+                'manufacturer': i.get('vehicle_manufacturer'),
                 'pit_in_flag_status': i.get('pit_in_flag_status'),
                 'pit_out_flag_status': i.get('pit_out_flag_status'),
                 'pit_in_race_time': i.get('pit_in_race_time'),
@@ -261,8 +261,8 @@ class NASCARDataProcessor:
             driver_stats_advanced.append({
                 'driver_id': driver.get('driver_id'),
                 'driver_name': driver.get('full_name'),
-                'vehicle_number': vehicle.get('vehicle_number'),
-                'vehicle_manufacturer': vehicle.get('vehicle_manufacturer'),
+                'car_number': vehicle.get('vehicle_number'),
+                'manufacturer': vehicle.get('vehicle_manufacturer'),
                 'sponsor_name': vehicle.get('sponsor_name'),
                 'best_lap': vehicle.get('best_lap'),
                 'best_lap_speed': vehicle.get('best_lap_speed'),

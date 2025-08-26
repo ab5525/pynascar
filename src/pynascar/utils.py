@@ -31,3 +31,25 @@ def get_series_name(series_id):
             return 'Cup Series'
 
 
+# Build name map from results, stripping symbols for matching
+def _clean_name(name):
+    if name is None:
+        return None
+    
+    cleaned = str(name).strip()
+    cleaned = re.sub(r'^[*#†‡§¶\s]+', '', cleaned)
+    cleaned = re.sub(r'[*#†‡§¶\s]+$', '', cleaned)
+    cleaned = re.sub(r'\s*\([^)]*\)\s*$', '', cleaned)
+    return cleaned.strip()
+
+name_mappings = {
+    "Daniel Suárez": "Daniel Suarez",
+    "John H. Nemechek": "John Hunter Nemechek",
+    "Ricky Stenhouse Jr": "Ricky Stenhouse Jr.",
+}
+
+def normalize_name(name):
+    cleaned = _clean_name(name)
+    if cleaned in name_mappings:
+        return name_mappings[cleaned]
+    return cleaned

@@ -5,10 +5,11 @@ import requests
 import warnings
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
-from .codes import FLAG_CODE
+from .codes import FLAG_CODE, NAME_MAPPINGS
 from .caching import load_df, save_df
 from .core.base_api import NascarAPI
 from .core.process_data import NASCARDataProcessor
+from .utils import normalize_name
 
 
 @dataclass
@@ -92,7 +93,7 @@ class Race:
                 self.results.stage_3 = cached_stage3 if cached_stage3 is not None else pd.DataFrame()
                 self.results.cautions = cached_cautions if cached_cautions is not None else pd.DataFrame()
                 self.results.lead_changes = cached_lead_changes if cached_lead_changes is not None else pd.DataFrame()
-                self.metadata.winner = self.results.results[self.results.results['finishing_position'] == 1]['driver'].values[0] if not self.results.results.empty else None
+                self.metadata.winner = self.results.results[self.results.results['finishing_position'] == 1]['driver_name'].values[0] if not self.results.results.empty else None
         
         print(f"Fetching Data for {self.metadata.year}-{self.metadata.series_id}-{self.metadata.race_id}")
         race_data = self.api.get_race_data(year = self.metadata.year, series_id = self.metadata.series_id,
@@ -124,16 +125,18 @@ class Race:
 
     def _process_race_results(self,race_data:Dict) -> None:
         self.results.results = self.data_processor.process_race_data(race_data)
+        self.results.results['driver_name'] = self.results.results['driver_name'].map(normalize_name)
         self.results.cautions = self.data_processor.process_caution_data(race_data)
         self.results.lead_changes = self.data_processor.process_leader_data(race_data)
-        self.results.lead_changes['driver_name'] = self.results.lead_changes['car_number'].map(self.results.results.set_index('driver_number')['driver']) if not self.results.lead_changes.empty else None
-        self.metadata.winner = self.results.results[self.results.results['finishing_position'] == 1]['driver'].values[0] if not self.results.results.empty else None
+        self.results.lead_changes['driver_name'] = self.results.lead_changes['car_number'].map(self.results.results.set_index('car_number')['driver_name']) if not self.results.lead_changes.empty else None
+        self.metadata.winner = self.results.results[self.results.results['finishing_position'] == 1]['driver_name'].values[0] if not self.results.results.empty else None
 
         stages_data = race_data.get('stage_results', [])
         for stage_data in stages_data:
             stage_num = stage_data.get('stage_number')
             if stage_num in [1, 2, 3]:
                 stage_df = self.data_processor.process_stage_data(stage_data, stage_num)
+                stage_df['driver_name'] = stage_df['driver_name'].map(normalize_name)
                 setattr(self.results, f"stage_{stage_num}", stage_df)
 
         if not self.live:
@@ -181,6 +184,13 @@ class Race:
         if lap_data:
             self.telemetry.lap_times = self.data_processor.process_laps_data(lap_data)
 
+            clean_res = self.results.results[['driver_name', 'driver_id','car_number']].copy()
+            clean_res['driver_name'] = clean_res['driver_name'].map(normalize_name)
+            name_to_id = clean_res[['driver_name', 'driver_id']].drop_duplicates("driver_name").set_index("driver_name")["driver_id"]
+
+            self.telemetry.lap_times['driver_name'] = self.telemetry.lap_times['driver_name'].map(normalize_name)
+            self.telemetry.lap_times['driver_id'] = self.telemetry.lap_times['driver_name'].map(name_to_id)
+
         if not self.live:
             save_df("laps", self.telemetry.lap_times, year=self.metadata.year, series_id=self.metadata.series_id, race_id=self.metadata.race_id)
     
@@ -193,6 +203,15 @@ class Race:
         )
         if pit_data:
             self.telemetry.pit_stops = self.data_processor.process_pit_stops(pit_data)
+            self.telemetry.pit_stops['driver_name'] = self.telemetry.pit_stops['driver_name'].map(normalize_name)
+
+            clean_res = self.results.results[['driver_name', 'driver_id','car_number']].copy()
+            clean_res['driver_name'] = clean_res['driver_name'].map(normalize_name)
+            name_to_id = clean_res[['driver_name', 'driver_id']].drop_duplicates("driver_name").set_index("driver_name")["driver_id"]
+            name_to_num = clean_res[['driver_name', 'car_number']].drop_duplicates("driver_name").set_index("driver_name")["car_number"]
+
+            self.telemetry.pit_stops['driver_id'] = self.telemetry.pit_stops['driver_name'].map(name_to_id)
+            self.telemetry.pit_stops['car_number'] = self.telemetry.pit_stops['driver_name'].map(name_to_num)
 
         if not self.live:
             save_df("pit_stops", self.telemetry.pit_stops, year=self.metadata.year, series_id=self.metadata.series_id, race_id=self.metadata.race_id)
@@ -235,12 +254,12 @@ class Race:
 
         if not self.driver_data.drivers.empty:
             name_map_df = (
-                    self.results.results[['driver_id', 'driver']]
-                    .dropna(subset=['driver_id', 'driver'])
+                    self.results.results[['driver_id', 'driver_name']]
+                    .dropna(subset=['driver_id', 'driver_name'])
                     .astype({'driver_id': 'Int64'})
                     .drop_duplicates(subset=['driver_id'], keep='first')
                 )
-            name_map = name_map_df.set_index('driver_id')['driver']
+            name_map = name_map_df.set_index('driver_id')['driver_name']
             self.driver_data.drivers['driver_name'] = self.driver_data.drivers['driver_id'].astype('Int64').map(name_map)
         if not self.live:
                 save_df("driver_stats", self.driver_data.drivers, year=self.metadata.year, series_id=self.metadata.series_id, race_id=self.metadata.race_id)
@@ -252,5 +271,9 @@ class Race:
             self.metadata.race_id,
         )
         self.driver_data.driver_stats_advanced = self.data_processor.process_adv_driver_data(adv_driver_stats_data)
+
+        self.driver_data.driver_stats_advanced['driver_name'] = self.driver_data.driver_stats_advanced['driver_name'].map(normalize_name)
+
+
         if not self.live:
             save_df("driver_stats_advanced", self.driver_data.driver_stats_advanced, year=self.metadata.year, series_id=self.metadata.series_id, race_id=self.metadata.race_id)
