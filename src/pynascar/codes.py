@@ -9,3 +9,13 @@ FLAG_CODE = {
     8: "Warm Up",
     9: "Not Active"
 }
+
+
+NAME_MAPPINGS = {
+    "Daniel Suarez": "Daniel Suarez",
+    "Daniel Suárez": "Daniel Suarez",
+    "John Hunter Nemechek": "John Hunter Nemechek",
+    "John H. Nemechek": "John Hunter Nemechek",
+    "Ricky Stenhouse Jr": "Ricky Stenhouse Jr.",
+    "Ricky Stenhouse Jr.": "Ricky Stenhouse Jr.",
+}
