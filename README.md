@@ -4,7 +4,7 @@
 
 ## Overview
 
-`pynascar` is a Python package for nascar race data acquisition. Read the [Full Documentation](https://github.com/ab5525) for all data functions and types.
+`pynascar` is a Python package for nascar race data acquisition and hopefully analysis
 
 ## Installation
 
