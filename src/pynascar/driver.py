@@ -1,21 +1,17 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Optional, List
-import unicodedata
 import pandas as pd
-import re
 import math
 import time
-import numpy as np
 
-from .caching import load_df, load_schedule, load_drivers_df, save_drivers_df
-from .codes import NAME_MAPPINGS
+from .caching import load_df, load_drivers_df, save_drivers_df
 from .schedule import Schedule
 from .race import Race
 
 @dataclass
 class Driver:
-    """Streamlined driver class focused on simplicity and clarity."""
+    """Streamlined driver class with clean, normalized data."""
     driver_id: int
     name: Optional[str] = None
     team: Optional[str] = None
@@ -28,22 +24,22 @@ class Driver:
         """Extract all driver data from a Race object."""
         race_metrics = {'race_id': race_id}
 
-        # Basic info and results from race.results.results
+        # Basic results and driver info
         self._add_results_data(race, race_metrics)
         
-        # Stage results
+        # Stage results  
         self._add_stage_data(race, race_metrics)
         
-        # Driver stats (position metrics, passes, etc.)
+        # Driver performance stats
         self._add_driver_stats(race, race_metrics)
         
-        # Lap analysis (speed, leader laps)
+        # Lap analysis
         self._add_lap_analysis(race, race_metrics)
         
         # Pit stops
         self._add_pit_data(race, race_id, race_metrics)
 
-        # Store final metrics
+        # Store with current driver info
         race_metrics.update({
             'driver_name': self.name,
             'team': self.team,
@@ -51,10 +47,10 @@ class Driver:
             'manufacturer': self.manufacturer
         })
         self.race_data[race_id] = race_metrics
- 
+
     def _add_results_data(self, race: Race, race_metrics: dict) -> None:
         """Add basic results data and update driver info."""
-        res = getattr(race.results, 'results', pd.DataFrame())
+        res = race.results.results
         if res.empty or 'driver_id' not in res.columns:
             return
 
@@ -63,25 +59,21 @@ class Driver:
             return
 
         row = driver_row.iloc[0]
-            
-        for attr, col in [('driver_name','driver_name'),('team', 'team'), ('car_number', 'car_number'), ('manufacturer', 'manufacturer')]:
+        
+        # Update driver info from latest race data
+        for attr, col in [('name', 'driver_name'), ('team', 'team'), 
+                         ('car_number', 'car_number'), ('manufacturer', 'manufacturer')]:
             val = row.get(col)
             if pd.notna(val) and str(val).strip():
-                setattr(self, attr, str(val) if attr == 'car_number' else val)
+                setattr(self, attr, val)
 
-        # Add race results
-        race_metrics.update({
-            'finishing_position': row.get('finishing_position'),
-            'starting_position': row.get('starting_position'),
-            'laps_completed': row.get('laps_completed'),
-            'points': row.get('points'),
-            'playoff_points': row.get('playoff_points'),
-            'qualifying_position': row.get('qualifying_position'),
-            'qualifying_speed': row.get('qualifying_speed'),
-        })
+        # Add race results (all already normalized in race.py)
+        for col in ['finishing_position', 'starting_position', 'laps_completed', 
+                   'points', 'playoff_points', 'qualifying_position', 'qualifying_speed']:
+            race_metrics[col] = row.get(col)
 
     def _add_stage_data(self, race: Race, race_metrics: dict) -> None:
-        """Add stage results."""
+        """Add stage results (already have race_id and driver_id)."""
         for stage_num in [1, 2, 3]:
             stage_df = getattr(race.results, f'stage_{stage_num}', pd.DataFrame())
             if not stage_df.empty and 'driver_id' in stage_df.columns:
@@ -92,7 +84,7 @@ class Driver:
                     race_metrics[f'stage{stage_num}_points'] = s.get('points')
 
     def _add_driver_stats(self, race: Race, race_metrics: dict) -> None:
-        """Add driver performance stats."""
+        """Add driver performance stats (already normalized)."""
         if not hasattr(race, 'driver_data'):
             return
             
@@ -101,10 +93,8 @@ class Driver:
             stats_row = race.driver_data.drivers[race.driver_data.drivers['driver_id'] == self.driver_id]
             if not stats_row.empty:
                 row = stats_row.iloc[0]
-                for col in ['mid_position', 'closing_position', 'best_position', 'worst_position', 
-                           'avg_position', 'fast_laps', 'top15_laps', 'passes_green_flag', 
-                           'quality_passes', 'lead_laps', 'rating', 'passed_green_flag']:
-                    if col in row.index and pd.notna(row[col]):
+                for col in row.index:
+                    if col not in ['driver_id', 'race_id', 'driver_name'] and pd.notna(row[col]):
                         race_metrics[col] = row[col]
 
         # Advanced stats
@@ -114,71 +104,54 @@ class Driver:
             if not adv_row.empty:
                 row = adv_row.iloc[0]
                 for col in row.index:
-                    if col != 'driver_id' and pd.notna(row[col]):
+                    if col not in ['driver_id', 'race_id', 'driver_name'] and pd.notna(row[col]):
                         race_metrics[col] = row[col]
 
     def _add_lap_analysis(self, race: Race, race_metrics: dict) -> None:
-        """Add lap-based metrics."""
-        laps_df = getattr(race.telemetry, 'lap_times', pd.DataFrame())
-        res = getattr(race.results, 'results', pd.DataFrame())
-        
-        if laps_df.empty or res.empty or not {"Number", "lap_speed", "Lap"}.issubset(laps_df.columns):
+        """Add lap-based metrics (already has driver_id mapping)."""
+        laps_df = race.telemetry.lap_times
+        if laps_df.empty or 'driver_id' not in laps_df.columns:
             return
 
-        # Map car numbers to driver IDs
-        num_to_id = (
-            res[["car_number", "driver_id"]]
-            .dropna()
-            .assign(car_number=res["car_number"].astype(str))
-            .drop_duplicates("car_number")
-            .set_index("car_number")["driver_id"]
-        )
-        
-        # Process lap data
-        laps = laps_df.copy()
-        laps["car_number"] = laps["Number"].astype(str)
-        laps["driver_id"] = laps["car_number"].map(num_to_id)
-        laps["lap_speed"] = pd.to_numeric(laps["lap_speed"], errors="coerce")
-        laps["Lap"] = pd.to_numeric(laps["Lap"], errors="coerce")
-        
-        # Filter to this driver
-        driver_laps = laps[laps["driver_id"] == self.driver_id]
+        # Filter to this driver (driver_id already mapped in race.py)
+        driver_laps = laps_df[laps_df['driver_id'] == self.driver_id]
         if driver_laps.empty:
             return
 
-        # Calculate metrics
+        # Calculate basic metrics
         race_metrics.update({
             "avg_lap_speed": driver_laps["lap_speed"].mean(),
             "fastest_lap": driver_laps["lap_speed"].max(),
             "total_laps": driver_laps["Lap"].max()
         })
         
-        # Leader laps (when this driver had fastest lap that lap)
-        laps["lap_speed_max"] = laps.groupby("Lap")["lap_speed"].transform("max")
-        leader_laps = (driver_laps["lap_speed"] == laps.loc[driver_laps.index, "lap_speed_max"]).sum()
+        # Leader laps calculation
+        laps_df["lap_speed_max"] = laps_df.groupby("Lap")["lap_speed"].transform("max")
+        leader_laps = (driver_laps["lap_speed"] == laps_df.loc[driver_laps.index, "lap_speed_max"]).sum()
         race_metrics["leader_laps"] = int(leader_laps)
         
-        # Speed rank
-        laps["speed_rank"] = laps.groupby("Lap")["lap_speed"].rank(ascending=False, method="min")
-        race_metrics["avg_speed_rank"] = laps[laps["driver_id"] == self.driver_id]["speed_rank"].mean()
+        # Average speed rank
+        laps_df["speed_rank"] = laps_df.groupby("Lap")["lap_speed"].rank(ascending=False, method="min")
+        race_metrics["avg_speed_rank"] = laps_df[laps_df["driver_id"] == self.driver_id]["speed_rank"].mean()
 
     def _add_pit_data(self, race: Race, race_id: int, race_metrics: dict) -> None:
-        """Add pit stop data."""
-        pit_df = getattr(race.telemetry, 'pit_stops', pd.DataFrame())
-        res = getattr(race.results, 'results', pd.DataFrame())
-        
-        if pit_df.empty or res.empty or "driver_name" not in pit_df.columns:
+        """Add pit stop data (already has driver_id and race_id)."""
+        pit_df = race.telemetry.pit_stops
+        if pit_df.empty or 'driver_id' not in pit_df.columns:
             return
 
-        # Filter to this driver and store
+        # Filter to this driver (driver_id already mapped in race.py)
         driver_pits = pit_df[pit_df["driver_id"] == self.driver_id].copy()
         if not driver_pits.empty:
-            driver_pits["race_id"] = race_id
+            # Store pit stops (race_id already added in race.py)
             self.pit_stops_df = pd.concat([self.pit_stops_df, driver_pits], ignore_index=True)
             
             # Add race metrics
             race_metrics["total_pit_stops"] = len(driver_pits)
-            pit_time_col = next((c for c in ["pit_time", "Pit Time", "total_duration"] if c in driver_pits.columns), None)
+            
+            # Find pit time column and calculate average
+            pit_time_cols = ["pit_time", "Pit Time", "total_duration"]
+            pit_time_col = next((c for c in pit_time_cols if c in driver_pits.columns), None)
             if pit_time_col:
                 race_metrics["avg_pit_time"] = pd.to_numeric(driver_pits[pit_time_col], errors="coerce").mean()
 
@@ -222,6 +195,7 @@ class Driver:
             **season_stats.to_dict()
         }
 
+
 @dataclass
 class DriversData:
     """Streamlined container for season driver data."""
@@ -255,7 +229,7 @@ class DriversData:
         # Process each race
         for race_id in race_ids:
             try:
-                # Check if we need to reload
+                # Check cache first
                 results_cached = load_df("results", year=year, series_id=series_id, race_id=race_id)
                 if (results_cached is None or results_cached.empty) and use_cache_only:
                     continue
@@ -266,8 +240,8 @@ class DriversData:
                 if should_reload and sleep_seconds > 0:
                     time.sleep(sleep_seconds)
 
-                # Extract driver data
-                res = getattr(race.results, 'results', pd.DataFrame())
+                # Process drivers from results (driver_id already clean)
+                res = race.results.results
                 if res.empty or 'driver_id' not in res.columns:
                     continue
 
@@ -305,21 +279,20 @@ class DriversData:
         for driver in self.drivers.values():
             race_data = driver.race_data.get(race_id)
             if race_data:
-                row = {
+                rows.append({
                     'driver_id': driver.driver_id,
                     'driver_name': driver.name,
                     'team': driver.team,
                     'car_number': driver.car_number,
                     'manufacturer': driver.manufacturer,
                     **race_data
-                }
-                rows.append(row)
+                })
         
         df = pd.DataFrame(rows)
         if df.empty:
             return df
 
-        # Add normalized speed if we have lap speeds
+        # Add normalized speed
         if 'avg_lap_speed' in df.columns and df['avg_lap_speed'].notna().any():
             max_speed, min_speed = df['avg_lap_speed'].max(), df['avg_lap_speed'].min()
             if max_speed != min_speed:
@@ -334,12 +307,8 @@ class DriversData:
         if not self.race_ids:
             return pd.DataFrame()
             
-        frames = []
-        for race_id in self.race_ids:
-            race_df = self.race_dataframe(race_id)
-            if not race_df.empty:
-                frames.append(race_df)
-        
+        frames = [self.race_dataframe(race_id) for race_id in self.race_ids]
+        frames = [f for f in frames if not f.empty]
         return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
     def driver_season_dataframe(self, driver_id: int) -> pd.DataFrame:
@@ -350,15 +319,14 @@ class DriversData:
 
         rows = []
         for race_id, race_data in sorted(driver.race_data.items()):
-            row = {
+            rows.append({
                 'driver_id': driver_id,
                 'driver_name': driver.name,
                 'team': driver.team,
                 'car_number': driver.car_number,
                 'manufacturer': driver.manufacturer,
                 **race_data
-            }
-            rows.append(row)
+            })
 
         return pd.DataFrame(rows)
 
