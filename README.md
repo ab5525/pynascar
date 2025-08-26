@@ -27,12 +27,11 @@ from pynascar.driver import DriversData
 
 # Enable local caching for faster repeated runs
 set_options(cache_enabled=True, cache_dir=".cache/", df_format="parquet")
-print(get_settings())  # verify settings
 
 # Series: 1=Cup, 2=Xfinity, 3=Trucks
 year = 2025
 series_id = 1
-race_id = 5577  # replace with a valid race id
+race_id = 5543
 
 # Schedules
 schedule = Schedule(year, series_id)
@@ -43,8 +42,6 @@ race = Race(year, series_id, race_id, reload=True)
 race.telemetry.lap_times.head()
 race.telemetry.pit_stops.head()
 race.events.head()
-# Example result subset (if available):
-# race.results.stage_1
 
 # Driver season aggregates
 dd = DriversData.build(2025, 1, use_cache_only=False)
