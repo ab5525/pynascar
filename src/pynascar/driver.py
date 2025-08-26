@@ -109,7 +109,7 @@ class Driver:
 
     def _add_lap_analysis(self, race: Race, race_metrics: dict) -> None:
         """Add lap-based metrics (already has driver_id mapping)."""
-        laps_df = race.telemetry.lap_times
+        laps_df = race.telemetry.lap_times.copy()
         if laps_df.empty or 'driver_id' not in laps_df.columns:
             return
 

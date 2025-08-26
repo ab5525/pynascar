@@ -126,6 +126,7 @@ class NASCARDataProcessor:
                         'driver_id': run.get('driver_id'),
                         'driver_name': run.get('driver_name'),
                         'manufacturer': run.get('manufacturer'),
+                        'qualifying_name': name,
                         'position': run.get('finishing_position'),
                         'lap_time': run.get('best_lap_time'),
                         'speed': run.get('best_lap_speed'),
