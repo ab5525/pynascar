@@ -138,7 +138,7 @@ class NASCARDataProcessor:
         practice_data = practice_data.sort_values(by='position') if not practice_data.empty else pd.DataFrame()
 
         qualifying_data = pd.DataFrame(quali_res) if quali_res else pd.DataFrame()
-        qualifying_data['qualifying_number'] = qualifying_data['practice_name'].apply(lambda x: _parse_practice_quali_number(x, practice=False)) if not qualifying_data.empty else None
+        qualifying_data['qualifying_number'] = qualifying_data['qualifying_name'].apply(lambda x: _parse_practice_quali_number(x, practice=False)) if not qualifying_data.empty else None
         qualifying_data = qualifying_data.sort_values(by='position') if not qualifying_data.empty else pd.DataFrame()
         return practice_data, qualifying_data
 

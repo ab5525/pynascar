@@ -49,6 +49,7 @@ class RaceTelemetry:
     pit_stops: pd.DataFrame = field(default_factory=pd.DataFrame)
     events: pd.DataFrame = field(default_factory=pd.DataFrame)
 
+@dataclass
 class RaceDriverData:
     """Container for race telemetry data."""
     drivers: pd.DataFrame = field(default_factory=pd.DataFrame)
@@ -93,7 +94,7 @@ class Race:
                 self.results.stage_3 = cached_stage3 if cached_stage3 is not None else pd.DataFrame()
                 self.results.cautions = cached_cautions if cached_cautions is not None else pd.DataFrame()
                 self.results.lead_changes = cached_lead_changes if cached_lead_changes is not None else pd.DataFrame()
-                self.metadata.winner = self.results.results[self.results.results['finishing_position'] == 1]['driver_name'].values[0] if not self.results.results.empty else None
+                self.metadata.winner = self._get_winner_name()
         
         print(f"Fetching Data for {self.metadata.year}-{self.metadata.series_id}-{self.metadata.race_id}")
         race_data = self.api.get_race_data(year = self.metadata.year, series_id = self.metadata.series_id,
@@ -128,9 +129,9 @@ class Race:
         self.results.results['driver_name'] = self.results.results['driver_name'].map(normalize_name)
         self.results.cautions = self.data_processor.process_caution_data(race_data)
         self.results.lead_changes = self.data_processor.process_leader_data(race_data)
-        self.results.lead_changes['driver_name'] = self.results.lead_changes['car_number'].map(self.results.results.set_index('car_number')['driver_name']) if not self.results.lead_changes.empty else None
-        self.metadata.winner = self.results.results[self.results.results['finishing_position'] == 1]['driver_name'].values[0] if not self.results.results.empty else None
-
+        if not self.results.lead_changes.empty:
+            self.results.lead_changes['driver_name'] = self.results.lead_changes['car_number'].map(self.results.results.set_index('car_number')['driver_name'])
+        self.metadata.winner = self._get_winner_name()
         stages_data = race_data.get('stage_results', [])
         for stage_data in stages_data:
             stage_num = stage_data.get('stage_number')
@@ -145,8 +146,15 @@ class Race:
             save_df("lead_changes", self.results.lead_changes, year=self.metadata.year, series_id=self.metadata.series_id, race_id=self.metadata.race_id)
             save_df('stage_1_results', self.results.stage_1, year=self.metadata.year, series_id=self.metadata.series_id, race_id=self.metadata.race_id)
             save_df('stage_2_results', self.results.stage_2, year=self.metadata.year, series_id=self.metadata.series_id, race_id=self.metadata.race_id)
+            # Disabled because most races don't have a stage 3 in data. Only Charlotte which normally has 4
             # if self.results.stage_3 is not None:
             #     save_df('stage_3_results', self.results.stage_3, year=self.metadata.year, series_id=self.metadata.series_id, race_id=self.metadata.race_id)
+
+    def _get_winner_name(self) -> str:
+        """Get the name of the race winner."""
+        if not self.results.results.empty:
+            return self.results.results[self.results.results['finishing_position'] == 1]['driver_name'].values[0]
+        return ""
 
     def _process_weekend_run_results(self, run_data: Dict) -> None:
         practice, qualifying = self.data_processor.process_practice_qualifying_data(run_data)
