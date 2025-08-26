@@ -46,6 +46,9 @@ name_mappings = {
     "Daniel Suárez": "Daniel Suarez",
     "John H. Nemechek": "John Hunter Nemechek",
     "Ricky Stenhouse Jr": "Ricky Stenhouse Jr.",
+    "Martin Truex Jr": "Martin Truex Jr.",
+    "Dale Earnhardt Jr": "Dale Earnhardt Jr."
+    
 }
 
 def normalize_name(name):

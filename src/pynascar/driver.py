@@ -179,6 +179,10 @@ class Driver:
             stats['top10s'] = (df['finishing_position'] <= 10).sum()
         if 'leader_laps' in df.columns:
             stats['total_leader_laps'] = df['leader_laps'].sum()
+        if 'passes_green_flag' in df.columns:
+            stats['total_passes_green_flag'] = df['passes_green_flag'].sum()
+        if 'passed_green_flag' in df.columns:
+            stats['total_passed_green_flag'] = df['passed_green_flag'].sum()
 
         return stats
 
