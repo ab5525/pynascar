@@ -18,20 +18,22 @@ class Schedule:
         
     '''
     
-    def __init__(self, year, series_id):
+    def __init__(self, year, series_id, use_cache=False):
         self.year = year
         self.series_id = series_id
         self.races = []
         self.data = pd.DataFrame()
-        self.fetch_races()     
+        self.use_cache = use_cache
+        self.fetch_races()      
 
     def fetch_races(self):
         """Fetch the race list for the specified year and series ID."""
-        cached_schedule = load_schedule(year=self.year, series_id=self.series_id)
-        if cached_schedule is not None:
-            self.data = cached_schedule
-            self.races = self.data.to_dict(orient="records")
-            return
+        if self.use_cache:
+            cached_schedule = load_schedule(year=self.year, series_id=self.series_id)
+            if cached_schedule is not None:
+                self.data = cached_schedule
+                self.races = self.data.to_dict(orient="records")
+                return
 
         url = f"https://cf.nascar.com/cacher/{self.year}/race_list_basic.json"
         response = requests.get(url)
@@ -49,7 +51,8 @@ class Schedule:
             
             self.data["track_type"] = self.data["track_name"].map(tracks_map).fillna("unknown")
 
-            save_schedule(self.data, year=self.year, series_id=self.series_id)
+            if self.use_cache:
+                save_schedule(self.data, year=self.year, series_id=self.series_id)
         else:
             warnings.warn(f"Failed to fetch race list: {response.status_code}")
     

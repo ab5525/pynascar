@@ -205,13 +205,20 @@ Example output:
 Below are example plots that can be generated with the package an example of that is in the examples folder:
 
 - **Average Speed per Driver**
-![Plotlot](figures/2025_Season_Average_Lap_Speed_Overall.png)
+![Plotlot](plots/2025_Season_Average_Lap_Speed_Overall.png)
 
 - **Average Position Difference**
-![Plot](figures/2025_Average_Closing_Laps_Passing_Difference.png)
+![Plot](plots/2025_Average_Closing_Laps_Passing_Difference.png)
 
 - **Quality Passes per race**
-![Placeholder plot](figures/2025_Average_Quality_Passes_Per_Race.png)
+![Placeholder plot](plots/2025_Average_Quality_Passes_Per_Race.png)
+
+- **Stage Charts**
+![Gateway 2025 s1](plots/Enjoy_Illinois_300_-_Stage_1_Position_Chart_20250907_191931.png)
+![Gateway 2025 s1](plots/Enjoy_Illinois_300_-_Stage_2_Position_Chart_20250907_191933.png)
+
+- **Lap Heatmap**
+![alt text](plots/Position_Heatmap_20250907_192500.png)
 
 ## TODO
 
@@ -222,7 +229,7 @@ Below are example plots that can be generated with the package an example of tha
 | 3   | Add Lap Stats                     | ![80%](https://progress-bar.xyz/80) | Laps exist within Race. Will add functions to analyze                   |
 | 3   | Add Pit Stats                     | ![70%](https://progress-bar.xyz/70) | Pits exist within Race and Driver. Will add functions to analyze        |
 | 4   | Add tests                         | ![0%](https://progress-bar.xyz/0) | No work done                                                            |
-| 5   | Add Laps from Practice/Qualifying | ![0%](https://progress-bar.xyz/0)  | This end point may not exist                                            |
+| 5   | Add Laps from Practice/Qualifying | ![0%](https://progress-bar.xyz/0)  | This end point may not exist. Edit: Found older endpoint https://cf.nascar.com/cacher/2019/2/4817/lapAvg_nxs_practice_1.json                                            |
 
 ## Acknowledgements
 
