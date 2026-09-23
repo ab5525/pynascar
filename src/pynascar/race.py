@@ -124,7 +124,9 @@ class Race:
             return
         loop = loop_data[0]
         drivers = loop.get('drivers') or []
-        if not drivers or loop.get('race_id') != self.metadata.race_id:
+        # Compare as strings: callers pass race IDs as int or str (both build
+        # valid URLs), while the feed's race_id is an int.
+        if not drivers or str(loop.get('race_id')) != str(self.metadata.race_id):
             return
         lap_data = self.api.get_lap_time_data(
             self.metadata.year, self.metadata.series_id, self.metadata.race_id
