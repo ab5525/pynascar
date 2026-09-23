@@ -87,7 +87,7 @@ class Race:
             cached_stage2 = load_df("stage_2_results", year=self.metadata.year, series_id=self.metadata.series_id, race_id=self.metadata.race_id)
             cached_stage3 = load_df("stage_3_results", year=self.metadata.year, series_id=self.metadata.series_id, race_id=self.metadata.race_id)
 
-            if cached_results is not None:
+            if cached_results is not None and not cached_results.empty:
                 self.results.results = cached_results
                 self.results.stage_1 = cached_stage1 if cached_stage1 is not None else pd.DataFrame()
                 self.results.stage_2 = cached_stage2 if cached_stage2 is not None else pd.DataFrame()
@@ -100,7 +100,7 @@ class Race:
         print(f"Fetching Data for {self.metadata.year}-{self.metadata.series_id}-{self.metadata.race_id}")
         race_data = self.api.get_race_data(year = self.metadata.year, series_id = self.metadata.series_id,
                                            race_id=self.metadata.race_id, live=self.live)
-        if not race_data:
+        if race_data is None:
             print(f"Failed to fetch race data for: {self.metadata.year}-{self.metadata.series_id}-{self.metadata.race_id}")
             return
         
@@ -109,11 +109,64 @@ class Race:
             race = weekend_race[0]
             self._update_metadata(race)
             self._process_race_results(race)
+        if self.results.results.empty and not self.live:
+            self._recover_results_from_loop_stats()
         weekend_runs = race_data.get('weekend_runs', [])
         if weekend_runs:
             self._process_weekend_run_results(weekend_runs)
         
     
+    def _recover_results_from_loop_stats(self):
+        loop_data = self.api.get_driver_stat_data(
+            self.metadata.year, self.metadata.series_id, self.metadata.race_id
+        )
+        if not loop_data:
+            return
+        loop = loop_data[0]
+        drivers = loop.get('drivers') or []
+        if not drivers or loop.get('race_id') != self.metadata.race_id:
+            return
+        lap_data = self.api.get_lap_time_data(
+            self.metadata.year, self.metadata.series_id, self.metadata.race_id
+        ) or {}
+        flags = lap_data.get('flags') or []
+        # Only reconstruct completed races, not a running or pre-race snapshot.
+        if not flags or flags[-1].get('FlagState') != 4:
+            return
+        identities = {
+            str(row['NASCARDriverID']): row
+            for row in lap_data.get('laps') or []
+            if row.get('NASCARDriverID') is not None
+        }
+        results = []
+        for driver in drivers:
+            identity = identities.get(str(driver.get('driver_id')), {})
+            results.append({
+                'driver_id': driver.get('driver_id'),
+                'driver_fullname': identity.get('FullName'),
+                'car_number': identity.get('Number'),
+                'car_make': identity.get('Manufacturer'),
+                'starting_position': driver.get('start_ps'),
+                'finishing_position': driver.get('ps'),
+                'laps_completed': driver.get('laps'),
+            })
+        self.results.results = self.data_processor.process_race_data({'results': results})
+        self.results.results['driver_name'] = self.results.results['driver_name'].map(normalize_name, na_action='ignore')
+        self.results.results = self.results.results.sort_values('finishing_position').reset_index(drop=True)
+        self.results.results['results_source'] = 'loop_stats'
+        self.metadata.name = loop.get('race_name')
+        self.metadata.scheduled_laps = loop.get('sch_laps')
+        self.metadata.entrant_num = len(self.results.results)
+        self.metadata.winner = self._get_winner_name()
+        warnings.warn(
+            f"Race {self.metadata.race_id}: weekend results unavailable; using loop stats. "
+            "Team, points and other weekend-only fields are unknown; "
+            "loop positions may not reflect post-race penalties.",
+            stacklevel=2,
+        )
+        save_df("results", self.results.results, year=self.metadata.year,
+                series_id=self.metadata.series_id, race_id=self.metadata.race_id)
+
     def _update_metadata(self, weekend_data: Dict) -> None:
         self.metadata.name = weekend_data.get('race_name')
         self.metadata.distance = weekend_data.get('scheduled_distance')
@@ -127,21 +180,25 @@ class Race:
 
     def _process_race_results(self,race_data:Dict) -> None:
         self.results.results = self.data_processor.process_race_data(race_data)
-        self.results.results['driver_name'] = self.results.results['driver_name'].map(normalize_name)
+        if not self.results.results.empty:
+            self.results.results['driver_name'] = self.results.results['driver_name'].map(normalize_name, na_action='ignore')
         self.results.cautions = self.data_processor.process_caution_data(race_data)
         self.results.lead_changes = self.data_processor.process_leader_data(race_data)
         if not self.results.lead_changes.empty:
-            self.results.lead_changes['driver_name'] = self.results.lead_changes['car_number'].map(self.results.results.set_index('car_number')['driver_name'])
+            names = self.results.results.reindex(columns=['car_number', 'driver_name'])
+            names = names.drop_duplicates('car_number').set_index('car_number')['driver_name']
+            self.results.lead_changes['driver_name'] = self.results.lead_changes['car_number'].map(names)
         self.metadata.winner = self._get_winner_name()
-        stages_data = race_data.get('stage_results', [])
+        stages_data = race_data.get('stage_results') or []
         for stage_data in stages_data:
             stage_num = stage_data.get('stage_number')
             if stage_num in [1, 2, 3]:
                 stage_df = self.data_processor.process_stage_data(stage_data, stage_num)
-                stage_df['driver_name'] = stage_df['driver_name'].map(normalize_name)
+                if not stage_df.empty:
+                    stage_df['driver_name'] = stage_df['driver_name'].map(normalize_name)
                 setattr(self.results, f"stage_{stage_num}", stage_df)
 
-        if not self.live:
+        if not self.live and not self.results.results.empty:
             save_df("results", self.results.results, year=self.metadata.year, series_id=self.metadata.series_id, race_id=self.metadata.race_id)
             save_df("cautions", self.results.cautions, year=self.metadata.year, series_id=self.metadata.series_id, race_id=self.metadata.race_id)
             save_df("lead_changes", self.results.lead_changes, year=self.metadata.year, series_id=self.metadata.series_id, race_id=self.metadata.race_id)
@@ -195,7 +252,8 @@ class Race:
         if lap_data:
             self.telemetry.lap_times = self.data_processor.process_laps_data(lap_data)
 
-            clean_res = self.results.results[['driver_name', 'driver_id','car_number']].copy()
+        if not self.telemetry.lap_times.empty:
+            clean_res = self.results.results.reindex(columns=['driver_name', 'driver_id', 'car_number']).copy()
             clean_res['driver_name'] = clean_res['driver_name'].map(normalize_name)
             name_to_id = clean_res[['driver_name', 'driver_id']].drop_duplicates("driver_name").set_index("driver_name")["driver_id"]
 
@@ -216,7 +274,7 @@ class Race:
             self.telemetry.pit_stops = self.data_processor.process_pit_stops(pit_data)
             self.telemetry.pit_stops['driver_name'] = self.telemetry.pit_stops['driver_name'].map(normalize_name)
 
-            clean_res = self.results.results[['driver_name', 'driver_id','car_number']].copy()
+            clean_res = self.results.results.reindex(columns=['driver_name', 'driver_id', 'car_number']).copy()
             clean_res['driver_name'] = clean_res['driver_name'].map(normalize_name)
             name_to_id = clean_res[['driver_name', 'driver_id']].drop_duplicates("driver_name").set_index("driver_name")["driver_id"]
             name_to_num = clean_res[['driver_name', 'car_number']].drop_duplicates("driver_name").set_index("driver_name")["car_number"]
@@ -265,7 +323,7 @@ class Race:
 
         if not self.driver_data.drivers.empty:
             name_map_df = (
-                    self.results.results[['driver_id', 'driver_name']]
+                    self.results.results.reindex(columns=['driver_id', 'driver_name'])
                     .dropna(subset=['driver_id', 'driver_name'])
                     .astype({'driver_id': 'Int64'})
                     .drop_duplicates(subset=['driver_id'], keep='first')
