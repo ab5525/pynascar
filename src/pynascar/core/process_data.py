@@ -17,7 +17,7 @@ class NASCARDataProcessor:
         if not data:
             return pd.DataFrame()
         
-        results = data.get('results', [])
+        results = data.get('results') or []
 
         driver_results = []
         for i in results:
@@ -39,7 +39,7 @@ class NASCARDataProcessor:
                 'playoff_points': i.get('playoff_points_earned'),
                 })
 
-        return pd.DataFrame(driver_results)
+        return pd.DataFrame(driver_results).drop_duplicates().reset_index(drop=True)
     
     @staticmethod
     def process_caution_data(data: Dict[str, Any]) -> pd.DataFrame:
@@ -47,7 +47,7 @@ class NASCARDataProcessor:
         if not data:
             return pd.DataFrame()
         
-        caution_segments = data.get('caution_segments', [])
+        caution_segments = data.get('caution_segments') or []
         caution_rows = []
         for i in caution_segments:
                 caution_rows.append({
@@ -65,7 +65,7 @@ class NASCARDataProcessor:
         if not data:
             return pd.DataFrame()
         
-        leaders = data.get('race_leaders', [])
+        leaders = data.get('race_leaders') or []
         leader_list = []
         for i in leaders:
                 leader_list.append({
@@ -81,7 +81,7 @@ class NASCARDataProcessor:
 
         if not data:
             return pd.DataFrame()
-        stages = data.get('results', [])
+        stages = data.get('results') or []
 
         stage_results = []
         for result in stages:
@@ -149,11 +149,11 @@ class NASCARDataProcessor:
             return pd.DataFrame()
         
         lap_times = []
-        for i in data.get('laps', []):
+        for i in data.get('laps') or []:
                 driver = i.get('FullName')
                 number = i.get('Number')
                 manufacturer = i.get('Manufacturer')
-                for j in i.get('Laps', []):
+                for j in i.get('Laps') or []:
                     lap_times.append({
                         'driver_name': driver,
                         'car_number': number,
@@ -164,6 +164,8 @@ class NASCARDataProcessor:
                         'position': j.get('RunningPos'),
                     })
         laps = pd.DataFrame(lap_times)
+        if laps.empty:
+            return laps
         laps['Lap'] = pd.to_numeric(laps['Lap'], errors='coerce').astype('Int64')
         laps['lap_time'] = pd.to_timedelta(laps['lap_time'], errors='coerce')
         laps['lap_speed'] = pd.to_numeric(laps['lap_speed'], errors='coerce')

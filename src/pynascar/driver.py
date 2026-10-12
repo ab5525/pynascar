@@ -9,6 +9,37 @@ from .caching import load_df, load_drivers_df, save_drivers_df
 from .schedule import Schedule
 from .race import Race
 
+def _analyze_laps(
+    laps_df: pd.DataFrame, driver_id: Optional[int] = None,
+) -> Dict[int, Dict]:
+    """Compute the field-wide speed comparisons once for each race."""
+    required_columns = ['driver_id', 'Lap', 'lap_speed']
+    if laps_df.empty or not set(required_columns).issubset(laps_df.columns):
+        return {}
+
+    # Work on a narrow copy; callers may reuse the original telemetry frame.
+    laps = laps_df[required_columns].copy()
+    by_lap = laps.groupby('Lap')['lap_speed']
+    laps['leader_lap'] = laps['lap_speed'] == by_lap.transform('max')
+    laps['speed_rank'] = by_lap.rank(ascending=False, method='min')
+
+    if driver_id is not None:
+        laps = laps[laps['driver_id'] == driver_id]
+
+    # Keep Series reductions for the same rounding/NA behavior as Driver's
+    # original calculations. Unmapped cars still contribute to the lap ranks.
+    return {
+        driver_key: {
+            'avg_lap_speed': rows['lap_speed'].mean(),
+            'fastest_lap': rows['lap_speed'].max(),
+            'total_laps': rows['Lap'].max(),
+            'leader_laps': int(rows['leader_lap'].sum()),
+            'avg_speed_rank': rows['speed_rank'].mean(),
+        }
+        for driver_key, rows in laps.groupby('driver_id', sort=False)
+    }
+
+
 @dataclass
 class Driver:
     """Streamlined driver class with clean, normalized data."""
@@ -20,7 +51,9 @@ class Driver:
     race_data: Dict[int, Dict] = field(default_factory=dict)  # race_id -> metrics
     pit_stops_df: pd.DataFrame = field(default_factory=pd.DataFrame)
 
-    def add_race_data(self, race: Race, race_id: int) -> None:
+    def add_race_data(
+        self, race: Race, race_id: int, *, _lap_analysis: Optional[Dict[int, Dict]] = None
+    ) -> None:
         """Extract all driver data from a Race object."""
         race_metrics = {'race_id': race_id}
 
@@ -34,7 +67,7 @@ class Driver:
         self._add_driver_stats(race, race_metrics)
         
         # Lap analysis
-        self._add_lap_analysis(race, race_metrics)
+        self._add_lap_analysis(race, race_metrics, _lap_analysis)
         
         # Pit stops
         self._add_pit_data(race, race_id, race_metrics)
@@ -81,7 +114,8 @@ class Driver:
                 if not stage_row.empty:
                     s = stage_row.iloc[0]
                     race_metrics[f'stage{stage_num}_position'] = s.get('finishing_position', s.get('position'))
-                    race_metrics[f'stage{stage_num}_points'] = s.get('points')
+                    stage_points = s.get('stage_points')
+                    race_metrics[f'stage{stage_num}_points'] = stage_points if pd.notna(stage_points) else s.get('points')
 
     def _add_driver_stats(self, race: Race, race_metrics: dict) -> None:
         """Add driver performance stats (already normalized)."""
@@ -107,32 +141,14 @@ class Driver:
                     if col not in ['driver_id', 'race_id', 'driver_name'] and pd.notna(row[col]):
                         race_metrics[col] = row[col]
 
-    def _add_lap_analysis(self, race: Race, race_metrics: dict) -> None:
-        """Add lap-based metrics (already has driver_id mapping)."""
-        laps_df = race.telemetry.lap_times.copy()
-        if laps_df.empty or 'driver_id' not in laps_df.columns:
-            return
-
-        # Filter to this driver (driver_id already mapped in race.py)
-        driver_laps = laps_df[laps_df['driver_id'] == self.driver_id]
-        if driver_laps.empty:
-            return
-
-        # Calculate basic metrics
-        race_metrics.update({
-            "avg_lap_speed": driver_laps["lap_speed"].mean(),
-            "fastest_lap": driver_laps["lap_speed"].max(),
-            "total_laps": driver_laps["Lap"].max()
-        })
-        
-        # Leader laps calculation
-        laps_df["lap_speed_max"] = laps_df.groupby("Lap")["lap_speed"].transform("max")
-        leader_laps = (driver_laps["lap_speed"] == laps_df.loc[driver_laps.index, "lap_speed_max"]).sum()
-        race_metrics["leader_laps"] = int(leader_laps)
-        
-        # Average speed rank
-        laps_df["speed_rank"] = laps_df.groupby("Lap")["lap_speed"].rank(ascending=False, method="min")
-        race_metrics["avg_speed_rank"] = laps_df[laps_df["driver_id"] == self.driver_id]["speed_rank"].mean()
+    def _add_lap_analysis(
+        self, race: Race, race_metrics: dict,
+        lap_analysis: Optional[Dict[int, Dict]] = None,
+    ) -> None:
+        """Use the shared race analysis, or calculate it for standalone calls."""
+        if lap_analysis is None:
+            lap_analysis = _analyze_laps(race.telemetry.lap_times, self.driver_id)
+        race_metrics.update(lap_analysis.get(self.driver_id, {}))
 
     def _add_pit_data(self, race: Race, race_id: int, race_metrics: dict) -> None:
         """Add pit stop data (already has driver_id and race_id)."""
@@ -143,7 +159,8 @@ class Driver:
         # Filter to this driver (driver_id already mapped in race.py)
         driver_pits = pit_df[pit_df["driver_id"] == self.driver_id].copy()
         if not driver_pits.empty:
-            # Store pit stops (race_id already added in race.py)
+            # Tag the copied rows so season pit stops can be filtered by race.
+            driver_pits["race_id"] = race_id
             self.pit_stops_df = pd.concat([self.pit_stops_df, driver_pits], ignore_index=True)
             
             # Add race metrics
@@ -230,8 +247,9 @@ class DriversData:
         race_ids = pd.to_numeric(finished_races[race_id_col], errors='coerce').dropna().astype(int).tolist()
         instance.race_ids = race_ids
 
-        # Process each race
-        for race_id in race_ids:
+        # Schedule returns newest first. Process oldest first so current
+        # driver information comes from the latest nonblank result.
+        for race_id in reversed(race_ids):
             try:
                 # Check cache first
                 results_cached = load_df("results", year=year, series_id=series_id, race_id=race_id)
@@ -251,10 +269,13 @@ class DriversData:
 
                 driver_ids = pd.to_numeric(res['driver_id'], errors='coerce').dropna().astype(int).unique()
                 
+                lap_analysis = _analyze_laps(race.telemetry.lap_times)
                 for driver_id in driver_ids:
                     if driver_id not in instance.drivers:
                         instance.drivers[driver_id] = Driver(driver_id=driver_id)
-                    instance.drivers[driver_id].add_race_data(race, race_id)
+                    instance.drivers[driver_id].add_race_data(
+                        race, race_id, _lap_analysis=lap_analysis
+                    )
 
             except Exception as e:
                 print(f"Error processing race {race_id}: {e}")
